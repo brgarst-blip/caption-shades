@@ -124,6 +124,10 @@ summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:in
     <small>Auto shows EQ after 2½ seconds of sound without words. Talk to bring captions back; EQ returns 3 seconds after the last speech result. Other room sounds can also trigger EQ.</small>
   </div>
   <p class="status" id="status">Playing the demo. Tap Start listening, allow the microphone and speech recognition, then talk.</p>
+  <div id="speechHelp" hidden>
+    <p class="help"><b>Speech service unavailable.</b> Microphone analysis and captions use separate browser services. If you are inside another app’s browser panel, copy this page’s URL into regular Google Chrome or iPhone Safari and tap Start listening there. If it also fails there, check your connection and try again.</p>
+    <button id="btnRetrySpeech" type="button">Retry speech</button>
+  </div>
   <div class="transcript" id="transcript"><span class="ph">Your words show up here as the browser hears them.</span></div>
 
   <details id="settings">
@@ -554,20 +558,44 @@ function updateLag(last) {
 /* ---------------- speech recognition ---------------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false, recBlocked = false, recPaused = false, recEverStarted = false, recStartT = 0, quickEnds = 0;
+let networkFailures = 0, recRetryTimer = null;
 const norm = s => s.toLowerCase().replace(/[^\w\s']/g, '').replace(/\s+/g, ' ').trim();
+
+function scheduleRec(delay) {
+  clearTimeout(recRetryTimer);
+  recRetryTimer = setTimeout(startRec, delay);
+}
+
+function speechRecovered() {
+  const recovering = networkFailures > 0;
+  networkFailures = 0; recPaused = false;
+  $('speechHelp').hidden = true;
+  setChip('speech', 'ok', 'Speech');
+  if (recovering) {
+    log('rec', 'speech service recovered');
+    if (!A.calib) status('Speech connected. Listening for your words.');
+  }
+}
 
 function buildRec() {
   rec = new SR();
   rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
-  rec.onstart = () => { recStartT = now(); recEverStarted = true; recPaused = false; setChip('speech', 'ok', 'Speech'); log('rec', 'start'); };
+  rec.onstart = () => {
+    if (!listening) { rec.stop(); return; }
+    recStartT = now(); recEverStarted = true;
+    // Starting the capture does not prove that the remote recognizer connected.
+    setChip('speech', networkFailures ? 'wait' : 'ok', networkFailures ? 'Speech connecting' : 'Speech');
+    log('rec', 'start');
+  };
   rec.onresult = e => {
+    if (!listening) return;
     // Safari sometimes repeats or accumulates results; collapse them into one transcript.
     let fin = '', all = '', last = '', allFinalSoFar = true;
     for (let i = 0; i < e.results.length; i++) {
       const r = e.results[i], tr = r[0].transcript.trim();
       if (!tr) continue;
       // Even hidden early guesses reserve the screen for incoming captions.
-      if (i >= (e.resultIndex || 0)) noteSpeech(now());
+      if (i >= (e.resultIndex || 0)) { speechRecovered(); noteSpeech(now()); }
       if (!r.isFinal) allFinalSoFar = false;
       if (!S.interim && !r.isFinal) continue;
       const nt = norm(tr);
@@ -582,6 +610,7 @@ function buildRec() {
   };
   rec.onerror = e => {
     log('rec', 'error ' + e.error + (e.message ? ' ' + e.message : ''));
+    if (!listening) return;
     if (e.error === 'no-speech' || e.error === 'aborted') return;
     if (e.error === 'not-allowed' && recEverStarted) {
       // Safari sometimes refuses an automatic restart; a tap brings it back.
@@ -590,25 +619,39 @@ function buildRec() {
     if (e.error === 'not-allowed') { recBlocked = true; setChip('speech', 'bad', 'Speech blocked'); status('Speech recognition was blocked. Allow it when Safari asks, make sure Dictation is on (Settings › General › Keyboard), then reload.', 'bad'); }
     else if (e.error === 'service-not-allowed') { recBlocked = true; setChip('speech', 'bad', 'Speech blocked'); status('Turn on Dictation in Settings › General › Keyboard, then reload this page.', 'bad'); }
     else if (e.error === 'audio-capture') { setChip('speech', 'bad', 'No mic'); status('Speech recognition couldn’t get the microphone. Try turning off Loudness tracking in Settings.', 'bad'); }
-    else if (e.error === 'network') { setChip('speech', 'wait', 'No network'); status('Speech recognition needs a connection right now. Retrying.', 'bad'); }
+    else if (e.error === 'network') {
+      networkFailures++;
+      $('speechHelp').hidden = false;
+      $('btnRetrySpeech').disabled = networkFailures < 3;
+      if (networkFailures >= 3) {
+        recPaused = true; clearTimeout(recRetryTimer);
+        setChip('speech', 'bad', 'Speech unavailable');
+        status('Speech could not connect after 3 attempts. Automatic retries paused; use Retry speech or open this page in regular Chrome / iPhone Safari. EQ can continue if microphone analysis is running.', 'bad');
+        log('rec', 'paused after repeated network errors');
+      } else {
+        setChip('speech', 'wait', 'Speech retry ' + networkFailures + '/2');
+        status('The browser’s speech service could not connect. Retrying (' + networkFailures + '/2)…', 'bad');
+      }
+    }
   };
   rec.onend = () => {
     log('rec', 'end');
     seg = [];
-    if (recPaused) return;
     if (!listening || recBlocked) { setChip('speech', recBlocked ? 'bad' : 'idle', recBlocked ? 'Speech blocked' : 'Speech'); return; }
-    setChip('speech', 'wait', 'Restarting');
+    if (recPaused) return;
+    setChip('speech', 'wait', networkFailures ? 'Speech retry ' + networkFailures + '/2' : 'Restarting');
     quickEnds = now() - recStartT < 1500 ? quickEnds + 1 : 0;
-    setTimeout(startRec, quickEnds > 2 ? 1200 : 60);
+    scheduleRec(networkFailures ? 1000 * networkFailures : quickEnds > 2 ? 1200 : 60);
   };
 }
 function startRec() {
-  if (!listening || recBlocked) return;
+  clearTimeout(recRetryTimer); recRetryTimer = null;
+  if (!listening || recBlocked || recPaused) return;
   if (!rec) buildRec();
   try { rec.start(); }
   catch (err) {
     if (err.name === 'InvalidStateError') return;   // already running
-    log('rec', 'start threw ' + err.name + ' ' + err.message); setTimeout(startRec, 300);
+    log('rec', 'start threw ' + err.name + ' ' + err.message); scheduleRec(300);
   }
 }
 
@@ -616,6 +659,8 @@ function startRec() {
 async function startListening() {
   stopDemo();
   listening = true; recBlocked = false; recPaused = false;
+  networkFailures = 0; recEverStarted = false; quickEnds = 0;
+  clearTimeout(recRetryTimer); $('speechHelp').hidden = true;
   $('btnStart').textContent = 'Stop listening'; $('btnStart').dataset.on = '1';
   $('btnDemo').disabled = true;
   words = []; seg = []; shoutQueue = []; shout = null; scrollInit = false; originX = 0;
@@ -638,10 +683,13 @@ async function startListening() {
 }
 function resumeRec() {
   if (!listening || !recPaused) return;
-  recPaused = false; setChip('speech', 'wait', 'Speech'); startRec();
+  recPaused = false; networkFailures = 0; $('speechHelp').hidden = true;
+  status('Retrying speech. Waiting for the browser’s recognition service.');
+  log('rec', 'manual retry'); setChip('speech', 'wait', 'Speech'); startRec();
 }
 function stopListening() {
   listening = false;
+  clearTimeout(recRetryTimer); recRetryTimer = null; $('speechHelp').hidden = true;
   $('btnStart').textContent = 'Start listening'; $('btnStart').dataset.on = '0';
   $('btnDemo').disabled = false;
   try { rec && rec.stop(); } catch (e) {}
@@ -713,7 +761,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && listening) {
     requestWake();
     if (A.ctx) A.ctx.resume().catch(() => {});
-    if (!recBlocked) { recPaused = false; startRec(); }
+    if (!recBlocked && !recPaused) startRec();
     log('vis', 'visible again');
   }
 });
@@ -1191,10 +1239,17 @@ $('btnStart').addEventListener('click', () => listening ? stopListening() : star
 $('btnDemo').addEventListener('click', () => demo ? stopDemo() : startDemo());
 $('btnCal').addEventListener('click', startCalibration);
 cv.addEventListener('click', resumeRec);
+$('btnRetrySpeech').addEventListener('click', () => {
+  if (!listening || recBlocked) return;
+  // While automatic retries are still underway, leave the one pending retry alone.
+  if (!recPaused) return;
+  resumeRec();
+});
 $('btnLog').addEventListener('click', () => {
   const summary = [
-    'Caption Shades log v3 — Auto EQ', 'UA: ' + navigator.userAgent,
+    'Caption Shades log v3 — Auto EQ / speech recovery', 'UA: ' + navigator.userAgent,
     'settings: ' + JSON.stringify(S),
+    'speech network failures: ' + networkFailures + ', paused: ' + recPaused,
     'display: ' + (EQ.active ? 'eq' : 'captions') + ', auto rule: sound 2500 ms / speech hold 3000 ms / quiet 1200 ms',
     'noise ' + A.noise.toFixed(1) + ' dB, normal voice ' + A.base.toFixed(1) + ' dB, hfBase ' + A.hfBase.toFixed(3),
     'lags: ' + lags.map(Math.round).join(', '), '---'

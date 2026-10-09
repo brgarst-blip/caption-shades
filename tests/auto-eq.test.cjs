@@ -9,6 +9,7 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
 function app(settings = {}) {
   let time = 0;
+  const timers = new Map(); let nextTimer = 0, starts = 0;
   const elements = new Map();
   const ctx = new Proxy({
     measureText: text => ({ width: text.length * 45, actualBoundingBoxAscent: 72, actualBoundingBoxDescent: 22 }),
@@ -29,20 +30,21 @@ function app(settings = {}) {
     getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); },
     createElement: element, addEventListener() {}
   };
-  class Recognition { start() {} stop() {} }
+  class Recognition { start() { starts++; } stop() {} }
   const sandbox = {
     document, performance: { now: () => time }, navigator: { userAgent: 'test' },
     localStorage: { getItem: () => JSON.stringify(settings), setItem() {} },
     matchMedia: () => ({ matches: false }), SpeechRecognition: Recognition,
     Path2D: class { constructor() { return new Proxy({}, { get: () => () => {} }); } },
-    setTimeout: () => 1, clearTimeout() {}, requestAnimationFrame() {}, addEventListener() {}
+    setTimeout(fn, delay) { const id = ++nextTimer; timers.set(id, { fn, delay }); return id; },
+    clearTimeout(id) { timers.delete(id); }, requestAnimationFrame() {}, addEventListener() {}
   };
   sandbox.window = sandbox;
   const context = vm.createContext(sandbox);
   const exposure = `
     window.testApp = { A, EQ, S, sampleEq, updateEq, pushFrame, updateBaselines, onTranscript,
       startAudio, stopAudio, startListening, stopListening, startDemo, stopDemo, tickDemo, frame,
-      buildRec, getRec: () => rec, setListening: v => { listening = v; },
+      buildRec, startRec, resumeRec, getRec: () => rec, setListening: v => { listening = v; },
       demoPhase: () => demo && demo.phase };
   `;
   vm.runInContext(script.replace(/\}\)\(\);\s*$/, exposure + '\n})();'), context);
@@ -63,7 +65,7 @@ function app(settings = {}) {
       api.updateEq(time, 0.05); api.updateBaselines(time);
     }
   }
-  return { api, sandbox, elements, live, tick, time: () => time, setTime: t => { time = t; } };
+  return { api, sandbox, elements, live, tick, timers, starts: () => starts, time: () => time, setTime: t => { time = t; } };
 }
 
 test('old saved settings gain Auto; scripted demo starts with EQ then captions', () => {
@@ -170,4 +172,44 @@ test('log identifies Auto EQ version and includes setting and mode changes', () 
   assert.match(a.elements.get('logBox').value, /Caption Shades log v3/);
   assert.match(a.elements.get('logBox').value, /mode\s+eq/);
   assert.match(a.elements.get('logBox').value, /range=8/);
+});
+
+test('network retries back off, pause after three failures, and keep EQ running', () => {
+  const a = app(); a.live(); a.tick(3000); a.api.buildRec();
+  const rec = a.api.getRec();
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    rec.onstart(); rec.onerror({ error: 'network' }); rec.onend();
+    if (attempt < 3) assert.equal([...a.timers.values()][0].delay, attempt * 1000);
+  }
+  assert.equal(a.timers.size, 0);
+  assert.equal(a.elements.get('chipSpeech').lastElementChild.textContent, 'Speech unavailable');
+  assert.equal(a.elements.get('speechHelp').hidden, false);
+  assert.equal(a.elements.get('btnRetrySpeech').disabled, false);
+  assert.equal(a.api.EQ.active, true);
+  a.api.startRec(); assert.equal(a.starts(), 0); // paused blocks stray retry
+  a.elements.get('btnRetrySpeech').listeners.click();
+  assert.equal(a.starts(), 1);
+  assert.equal(a.elements.get('speechHelp').hidden, true);
+});
+
+test('actual speech results clear a network error; capture start alone does not', () => {
+  const a = app(); a.live(); a.api.buildRec(); const rec = a.api.getRec();
+  rec.onerror({ error: 'network' }); rec.onstart();
+  assert.equal(a.elements.get('speechHelp').hidden, false);
+  assert.equal(a.elements.get('chipSpeech').dataset.state, 'wait');
+  const result = [{ transcript: 'hello' }]; result.isFinal = true;
+  rec.onresult({ resultIndex: 0, results: [result] });
+  assert.equal(a.elements.get('speechHelp').hidden, true);
+  assert.equal(a.elements.get('status').dataset.tone, '');
+  assert.match(a.elements.get('status').textContent, /Speech connected/);
+});
+
+test('Stop cancels scheduled retries and ignores late recognition events', () => {
+  const a = app(); a.live(); a.api.buildRec(); const rec = a.api.getRec();
+  rec.onerror({ error: 'network' }); rec.onend(); assert.equal(a.timers.size, 1);
+  a.api.stopListening(); assert.equal(a.timers.size, 0);
+  rec.onerror({ error: 'network' }); rec.onend();
+  assert.equal(a.elements.get('status').textContent, 'Stopped.');
+  assert.equal(a.elements.get('speechHelp').hidden, true);
+  assert.equal(a.timers.size, 0);
 });
