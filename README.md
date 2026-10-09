@@ -13,9 +13,12 @@ If Speech shows *blocked*, turn on Dictation in Settings › General › Keyboar
 ## What's in Settings
 
 - **Shout threshold:** how many dB above your normal voice counts as a full shout.
-- **LED bars:** rows of LEDs on the grille. More bars means sharper text but less to see through.
-- **Display:** the LED grille as the hardware could draw it, or the ideal full-resolution version.
+- **Words:** *Scroll* slides the line left as you talk. *Pop on* drops each word in place and starts a fresh line when it fills or you pause. *One word* shows each word on its own.
+- **LED bars:** rows of LEDs on the grille, from 6 to 20. Shows the LED count, how much of the lens you can see through, and the gap between bars, and flags gaps too narrow to manufacture.
+- **LED size:** 1 mm LEDs (78 across, sharper) or 1.6 mm bright LEDs (66 across, about twice as bright, wider bars).
+- **Display:** the LED grille as the hardware could draw it, to scale, or the ideal full-resolution version.
 - **Show early guesses:** draws words the instant Safari guesses them, dimmed, then locks them in.
+- **Typing cursor:** appears the moment you start talking, colored by how loud you are, so the glasses react before the words arrive.
 - **Loudness tracking:** turn off if the mic level and speech recognition fight each other.
 - **Calibrate:** talk normally for 4 seconds so it learns your normal voice.
 - **Copy log:** timings and events for tuning.
