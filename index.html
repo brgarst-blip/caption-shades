@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07080c">
+<title>Caption Shades</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen stage. The glasses are the hero; a quiet console sits underneath.
+   Deliberately single-theme dark: it's a stage, and the LEDs are the only color. */
+:root{
+  color-scheme: dark;
+  --stage:#07080c;
+  --panel:#10121a;
+  --line:#232633;
+  --ink:#eceef5;
+  --muted:#8b90a5;
+  --warm:#ffc861;   /* tier 1: raised */
+  --hot:#ff3dbb;    /* tier 2: loud */
+  --ok:#5ee0a0;
+  --bad:#ff6b5e;
+  --font-ui:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--stage);color:var(--ink);font:15px/1.45 var(--font-ui);-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
+.app{min-height:100%;max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:14px;
+  padding:calc(env(safe-area-inset-top,0px) + 12px) max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 24px) max(16px,env(safe-area-inset-left,0px))}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px 14px;flex-wrap:wrap}
+h1{margin:0;font:800 15px/1 var(--font-ui);letter-spacing:.14em;text-transform:uppercase}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--line);border-radius:999px;font:500 12px/1 var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.chip i{width:7px;height:7px;border-radius:50%;background:#4a4e5e;flex:none}
+.chip[data-state="ok"] i{background:var(--ok)}
+.chip[data-state="wait"] i{background:var(--warm)}
+.chip[data-state="bad"] i{background:var(--bad)}
+.chip[data-state="ok"],.chip[data-state="wait"],.chip[data-state="bad"]{color:var(--ink)}
+.stage{display:flex;justify-content:center}
+#glasses{display:block;width:100%;max-width:100%;aspect-ratio:3.1 / 1;touch-action:manipulation}
+.meter{display:flex;flex-direction:column;gap:6px}
+.track{position:relative;height:10px;border-radius:5px;overflow:hidden;
+  background:linear-gradient(90deg,#1b1d27 0 34.6%,#3a2c14 34.6% 53.8%,#3d1535 53.8% 76.9%,#2a1640 76.9% 100%)}
+.fill{position:absolute;inset:0;transform-origin:0 50%;transform:scaleX(0);background:var(--ink);opacity:.9}
+.heat{position:absolute;top:0;bottom:0;width:2px;left:0;background:var(--warm);opacity:.9}
+.labels{display:grid;grid-template-columns:45fr 25fr 30fr 30fr;font:500 11px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.labels span{padding-left:2px;transition:color .15s}
+.labels span.on{color:var(--ink)}
+.controls{display:flex;gap:10px}
+button{font:600 15px/1 var(--font-ui);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-height:50px;cursor:pointer}
+button:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--warm);outline-offset:2px}
+button:disabled{opacity:.4;cursor:default}
+#btnStart{flex:1;background:var(--ink);color:var(--stage);border-color:var(--ink)}
+#btnStart[data-on="1"]{background:transparent;color:var(--ink);border-color:var(--bad)}
+.status{margin:0;color:var(--muted);font-size:14px;min-height:1.45em;text-wrap:pretty}
+.status[data-tone="bad"]{color:var(--bad)}
+.transcript{margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font:400 13px/1.5 var(--font-mono);min-height:3.4em;max-height:6.2em;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;color:var(--ink);overflow-wrap:anywhere}
+.transcript .interim{color:var(--muted)}
+.transcript .ph{color:var(--muted)}
+details{border-top:1px solid var(--line)}
+summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:inside}
+.rows{display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.row label,.row .lab{font-weight:600}
+.row output{font:500 13px/1 var(--font-mono);color:var(--warm);font-variant-numeric:tabular-nums}
+.row small{grid-column:1 / -1;color:var(--muted);font-size:13px}
+.row input[type="range"]{grid-column:1 / -1;width:100%;accent-color:var(--warm)}
+.row input[type="checkbox"]{width:22px;height:22px;accent-color:var(--warm)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;border-radius:0;min-height:36px;padding:8px 12px;background:transparent;font-size:13px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--stage)}
+.row button.small{min-height:38px;padding:8px 12px;font-size:13px}
+.readouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:12px 0}
+.readouts div{padding:8px 10px;background:var(--panel);border-radius:8px;min-width:0}
+.readouts span{display:block;font:500 10px/1.2 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.readouts b{display:block;margin-top:4px;font:500 16px/1.2 var(--font-mono);font-variant-numeric:tabular-nums}
+.help{color:var(--muted);font-size:13px;margin:4px 0 0}
+.help b{color:var(--ink);font-weight:600}
+#logBox{width:100%;height:9em;margin-top:8px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;font:400 11px/1.4 var(--font-mono);padding:8px}
+@media (orientation:landscape) and (max-height:540px){
+  .app{gap:8px;padding-top:calc(env(safe-area-inset-top,0px) + 6px)}
+  #glasses{width:auto;height:min(66vh,calc((100vw - 32px) / 3.1))}
+  .top h1{font-size:12px}
+  .transcript{display:none}
+  button{min-height:42px;padding:10px 14px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <h1>Caption Shades</h1>
+    <div class="chips" role="status" aria-live="polite">
+      <span class="chip" id="chipMic" data-state="idle"><i></i><span>Mic</span></span>
+      <span class="chip" id="chipSpeech" data-state="idle"><i></i><span>Speech</span></span>
+      <span class="chip" id="chipLag" data-state="idle"><i></i><span>Lag —</span></span>
+    </div>
+  </header>
+
+  <div class="stage"><canvas id="glasses" aria-label="Simulated LED caption glasses"></canvas></div>
+
+  <div class="meter" aria-hidden="true">
+    <div class="track"><div class="fill" id="meterFill"></div><div class="heat" id="meterHeat"></div></div>
+    <div class="labels"><span id="lab0">Calm</span><span id="lab1">Raised</span><span id="lab2">Loud</span><span id="lab3">Shout</span></div>
+  </div>
+
+  <div class="controls">
+    <button id="btnStart" type="button">Start listening</button>
+    <button id="btnDemo" type="button">Play demo</button>
+  </div>
+  <p class="status" id="status">Playing the demo. Tap Start listening, allow the microphone and speech recognition, then talk.</p>
+  <div class="transcript" id="transcript"><span class="ph">Your words show up here as Safari hears them.</span></div>
+
+  <details id="settings">
+    <summary>Settings and diagnostics</summary>
+    <div class="rows">
+      <div class="row">
+        <label for="inRange">Shout threshold</label><output id="outRange">16 dB</output>
+        <input id="inRange" type="range" min="8" max="30" step="1" value="16">
+        <small>How much louder than your normal voice counts as a full shout. Lower is more trigger-happy.</small>
+      </div>
+      <div class="row">
+        <label for="inRows">LED bars</label><output id="outRows">14 bars</output>
+        <input id="inRows" type="range" min="8" max="24" step="1" value="14">
+        <small>Rows of LEDs on the grille. More bars means sharper text but less to see through.</small>
+      </div>
+      <div class="row">
+        <span class="lab" id="labView">Display</span>
+        <div class="seg" role="group" aria-labelledby="labView">
+          <button type="button" id="viewLed" aria-pressed="true">LED grille</button>
+          <button type="button" id="viewIdeal" aria-pressed="false">Ideal</button>
+        </div>
+        <small>LED grille shows what the hardware could actually draw. Ideal shows the design at full resolution.</small>
+      </div>
+      <div class="row">
+        <label for="inInterim">Show early guesses</label><input id="inInterim" type="checkbox" checked>
+        <small>Draws words the moment Safari guesses them, slightly dimmed, then locks them in. Turn off to compare the lag.</small>
+      </div>
+      <div class="row">
+        <label for="inAnalysis">Loudness tracking</label><input id="inAnalysis" type="checkbox" checked>
+        <small>Turn off to test captions on their own if the mic level and speech fight each other.</small>
+      </div>
+      <div class="row">
+        <span class="lab">Calibrate your normal voice</span><button type="button" class="small" id="btnCal">Calibrate</button>
+        <small>While listening, tap and talk normally for 4 seconds. It also learns on its own as you talk.</small>
+      </div>
+    </div>
+    <div class="readouts" aria-live="off">
+      <div><span>Room noise</span><b id="roNoise">—</b></div>
+      <div><span>Normal voice</span><b id="roBase">—</b></div>
+      <div><span>Level now</span><b id="roLevel">—</b></div>
+      <div><span>Intensity</span><b id="roScore">—</b></div>
+      <div><span>Heat</span><b id="roHeat">—</b></div>
+      <div><span>Lag (median)</span><b id="roLag">—</b></div>
+    </div>
+    <div class="row">
+      <span class="lab">Session log</span><button type="button" class="small" id="btnLog">Copy log</button>
+      <small>Copies timings and events so you can paste them back to Claude for tuning.</small>
+    </div>
+    <textarea id="logBox" readonly hidden aria-label="Session log"></textarea>
+    <p class="help"><b>If Speech shows blocked:</b> turn on Dictation in Settings › General › Keyboard, allow the microphone for Safari, then reload. Use Safari itself, not a home-screen shortcut.</p>
+  </details>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const now = () => performance.now();
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const RM = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------------- settings ---------------- */
+const DEFAULTS = { range: 16, rows: 14, view: 'led', interim: true, analysis: true };
+const S = Object.assign({}, DEFAULTS);
+try { Object.assign(S, JSON.parse(localStorage.getItem('caption-shades') || '{}')); } catch (e) {}
+const saveSettings = () => { try { localStorage.setItem('caption-shades', JSON.stringify(S)); } catch (e) {} };
+
+/* Intensity score: 0.15 is your normal voice, 1.0 is a full shout.
+   Thresholds are the minimum score for tiers 1..3. */
+const TIER = [0, 0.45, 0.70, 1.0];
+const TIER_NAMES = ['calm', 'raised', 'loud', 'shout'];
+const tierOf = v => v >= TIER[3] ? 3 : v >= TIER[2] ? 2 : v >= TIER[1] ? 1 : 0;
+const ASPECT = 3.1;      // glasses front: width / height
+const BAR_RATIO = 2.5;   // vertical bar pitch / horizontal LED pitch (dense across, sparse down)
+
+/* ---------------- log ---------------- */
+const LOG = []; const T0 = now();
+function log(type, msg) {
+  LOG.push(((now() - T0) / 1000).toFixed(3).padStart(8) + '  ' + type.padEnd(6) + ' ' + msg);
+  if (LOG.length > 500) LOG.shift();
+}
+
+/* ---------------- helpers ---------------- */
+function pct(arr, p) {
+  if (!arr.length) return 0;
+  const a = arr.slice().sort((x, y) => x - y);
+  return a[clamp(Math.floor(p * (a.length - 1)), 0, a.length - 1)];
+}
+function mulberry(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function hsl(h, s, l) { // -> [r,g,b] 0..255
+  h = ((h % 360) + 360) % 360 / 360;
+  const f = n => { const k = (n + h * 12) % 12; return l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  return [f(0) * 255, f(8) * 255, f(4) * 255];
+}
+
+/* ---------------- audio analysis ---------------- */
+const A = {
+  ctx: null, stream: null, analyser: null, td: null, fd: null, ok: false,
+  frames: [], voicedDb: [], voicedHf: [], allDb: [],
+  noise: -70, base: -36, hfBase: 0.12, lastBaseT: 0,
+  live: 0, liveTarget: 0, heat: 0, db: -100, hf: 0,
+  lastVoicedT: -1e9, onsetT: 0, firstWordPending: false,
+  cursor: 0, calib: null, demoUntil: 0
+};
+
+async function startAudio() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!A.ctx) A.ctx = new AC();
+  await A.ctx.resume();
+  A.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  const src = A.ctx.createMediaStreamSource(A.stream);
+  A.analyser = A.ctx.createAnalyser();
+  A.analyser.fftSize = 1024;
+  A.analyser.smoothingTimeConstant = 0;
+  const mute = A.ctx.createGain(); mute.gain.value = 0;   // keeps Safari pulling audio through the graph
+  src.connect(A.analyser); A.analyser.connect(mute); mute.connect(A.ctx.destination);
+  A.td = new Float32Array(A.analyser.fftSize);
+  A.fd = new Float32Array(A.analyser.frequencyBinCount);
+  A.ok = true;
+  A.stream.getAudioTracks().forEach(tr => {
+    tr.onended = () => { A.ok = false; setChip('mic', 'bad', 'Mic ended'); log('mic', 'track ended'); };
+    tr.onmute = () => { setChip('mic', 'wait', 'Mic muted'); log('mic', 'muted'); };
+    tr.onunmute = () => { setChip('mic', 'ok', 'Mic'); log('mic', 'unmuted'); };
+  });
+  log('mic', 'started, ' + A.ctx.sampleRate + ' Hz');
+}
+function stopAudio() {
+  if (A.stream) A.stream.getTracks().forEach(t => t.stop());
+  A.stream = null; A.ok = false;
+}
+
+function analyze(t) {
+  if (!A.ok || !S.analysis) { A.liveTarget = 0; return; }
+  A.analyser.getFloatTimeDomainData(A.td);
+  let sum = 0; for (let i = 0; i < A.td.length; i++) sum += A.td[i] * A.td[i];
+  const db = 20 * Math.log10(Math.sqrt(sum / A.td.length) + 1e-9);
+  A.analyser.getFloatFrequencyData(A.fd);
+  const binHz = A.ctx.sampleRate / A.analyser.fftSize;
+  let lo = 0, hi = 0;
+  const i0 = Math.floor(150 / binHz), i1 = Math.min(A.fd.length, Math.ceil(6000 / binHz)), i2 = Math.floor(2000 / binHz);
+  for (let i = i0; i < i1; i++) { const p = Math.pow(10, A.fd[i] / 10); lo += p; if (i >= i2) hi += p; }
+  pushFrame(t, db, lo > 0 ? hi / lo : 0);
+}
+
+function scoreOf(db, hf) {
+  const loud = (db - A.base) / S.range;               // 1.0 = shout threshold above normal
+  const bright = clamp((hf - A.hfBase) / 0.25, -0.4, 0.8); // shouting pushes energy up the spectrum
+  return Math.max(0, 0.15 + loud * 0.85 + bright * 0.2);
+}
+
+function pushFrame(t, db, hf) {
+  A.db = db; A.hf = hf;
+  A.allDb.push(db); if (A.allDb.length > 600) A.allDb.shift();
+  const voiced = db > Math.max(A.noise + 9, -62);
+  let s = 0;
+  if (voiced) {
+    A.voicedDb.push(db); if (A.voicedDb.length > 1500) A.voicedDb.shift();
+    A.voicedHf.push(hf); if (A.voicedHf.length > 1500) A.voicedHf.shift();
+    if (A.calib) { A.calib.db.push(db); A.calib.hf.push(hf); }
+    s = scoreOf(db, hf);
+    if (t - A.lastVoicedT > 650) { A.onsetT = t; A.firstWordPending = true; log('onset', db.toFixed(1) + ' dB'); }
+    A.lastVoicedT = t;
+  }
+  A.frames.push({ t, voiced, s });
+  while (A.frames.length && A.frames[0].t < t - 8000) A.frames.shift();
+  A.liveTarget = s;
+}
+
+function updateBaselines(t) {
+  if (t - A.lastBaseT < 500) return;
+  A.lastBaseT = t;
+  if (A.allDb.length > 60) A.noise = clamp(pct(A.allDb, 0.15), -90, -20);
+  if (A.voicedDb.length > 90) {
+    A.base = Math.max(pct(A.voicedDb, 0.7), A.noise + 8);  // 70th percentile ~ a typical word peak
+    A.hfBase = pct(A.voicedHf, 0.5);
+  }
+  if (A.calib && t - A.calib.start > 4000) finishCalibration();
+}
+
+function stepLive(dt) {
+  if (!listening) A.liveTarget = now() < A.demoUntil ? A.demoLive : 0;
+  const tau = A.liveTarget > A.live ? 0.03 : 0.35;
+  A.live += (A.liveTarget - A.live) * (1 - Math.exp(-dt / tau));
+  const htau = A.live > A.heat ? 2.0 : 5.0;
+  A.heat += (A.live - A.heat) * (1 - Math.exp(-dt / htau));
+}
+
+/* Scores for k words that just appeared. Recognition lags the audio, so look back
+   from the last assignment to slightly before now and split the voiced frames evenly. */
+function newScores(k, t) {
+  const end = t - 200;
+  const start = Math.max(A.cursor, t - 2500);
+  let fr = A.frames.filter(f => f.voiced && f.t >= start && f.t <= end);
+  A.cursor = end;
+  const bump = 0.25 * Math.max(0, A.heat - 0.3);  // a sustained rant pushes everything up
+  if (fr.length < 2 * k) {
+    const rec = A.frames.filter(f => f.voiced && f.t >= t - 1200);
+    const v = rec.length ? pct(rec.map(f => f.s), 0.75) : 0.15;
+    return Array(k).fill(v + bump);
+  }
+  const out = [];
+  for (let i = 0; i < k; i++) {
+    const a = Math.floor(i * fr.length / k), b = Math.max(a + 1, Math.floor((i + 1) * fr.length / k));
+    out.push(pct(fr.slice(a, b).map(f => f.s), 0.75) + bump);
+  }
+  return out;
+}
+
+/* ---------------- words + transcript ---------------- */
+let words = [];        // display list (oldest first)
+let seg = [];          // words of the current recognition session, by index
+let shoutQueue = [], shout = null;
+let lastWordT = -1e9, originX = 0, scroll = 0, scrollInit = false, fade = 1;
+const lags = [];
+
+function addWord(text, score, t, final) {
+  const w = { text, score, tier: tierOf(score), born: t, final, width: 0, wkey: '' };
+  w.disp = w.tier >= 2 ? text.toUpperCase() : text;
+  words.push(w);
+  lastWordT = t; fade = 1;
+  if (w.tier === 3) shoutQueue.push(w);
+  return w;
+}
+
+function onTranscript(text, finalCount) {
+  const t = now();
+  const toks = text.trim().split(/\s+/).filter(Boolean);
+  const oldLen = seg.length;
+  const k = Math.max(0, toks.length - oldLen);
+  const scores = k ? (S.analysis && A.ok ? newScores(k, t) : Array(k).fill(0.15)) : [];
+  for (let i = 0; i < toks.length; i++) {
+    const fin = i < finalCount;
+    if (i < oldLen) {
+      const w = seg[i];
+      if (w.text !== toks[i]) { w.text = toks[i]; w.disp = w.tier >= 2 ? toks[i].toUpperCase() : toks[i]; }
+      w.final = fin;
+    } else {
+      seg.push(addWord(toks[i], scores[i - oldLen], t, fin));
+    }
+  }
+  if (toks.length < oldLen) {
+    const gone = seg.splice(toks.length);
+    gone.forEach(w => { const j = words.lastIndexOf(w); if (j >= 0) words.splice(j, 1); const q = shoutQueue.indexOf(w); if (q >= 0) shoutQueue.splice(q, 1); });
+  }
+  if (k) {
+    if (A.firstWordPending) {
+      const lag = t - A.onsetT; A.firstWordPending = false;
+      if (lag > 0 && lag < 6000) { lags.push(lag); if (lags.length > 12) lags.shift(); updateLag(lag); }
+    }
+    log('words', '+' + k + ' "' + toks.slice(-k).join(' ') + '" score ' + scores.map(s => s.toFixed(2)).join(','));
+  }
+  renderTranscript(toks, finalCount);
+}
+
+function renderTranscript(toks, finalCount) {
+  const el = $('transcript');
+  const fin = toks.slice(0, finalCount).join(' ');
+  const inter = toks.slice(finalCount).join(' ');
+  el.textContent = '';
+  const tail = s => s.length > 220 ? '…' + s.slice(-220) : s;
+  const a = document.createElement('span'); a.textContent = tail(fin) + (inter ? ' ' : '');
+  const b = document.createElement('span'); b.className = 'interim'; b.textContent = inter;
+  const line = document.createElement('div'); line.append(a, b); el.append(line);
+}
+
+function updateLag(last) {
+  const med = pct(lags, 0.5);
+  setChip('lag', med < 600 ? 'ok' : med < 1000 ? 'wait' : 'bad', 'Lag ' + Math.round(med) + ' ms');
+  $('roLag').textContent = Math.round(med) + ' ms';
+  log('lag', Math.round(last) + ' ms (median ' + Math.round(med) + ')');
+}
+
+/* ---------------- speech recognition ---------------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false, recBlocked = false, recPaused = false, recEverStarted = false, recStartT = 0, quickEnds = 0;
+const norm = s => s.toLowerCase().replace(/[^\w\s']/g, '').replace(/\s+/g, ' ').trim();
+
+function buildRec() {
+  rec = new SR();
+  rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+  rec.onstart = () => { recStartT = now(); recEverStarted = true; recPaused = false; setChip('speech', 'ok', 'Speech'); log('rec', 'start'); };
+  rec.onresult = e => {
+    // Safari sometimes repeats or accumulates results; collapse them into one transcript.
+    let fin = '', all = '', last = '', allFinalSoFar = true;
+    for (let i = 0; i < e.results.length; i++) {
+      const r = e.results[i], tr = r[0].transcript.trim();
+      if (!tr) continue;
+      if (!r.isFinal) allFinalSoFar = false;
+      if (!S.interim && !r.isFinal) continue;
+      const nt = norm(tr);
+      if (all && nt.startsWith(norm(all))) all = tr;          // cumulative result
+      else if (nt === norm(last)) { /* repeated result */ }
+      else all = all ? all + ' ' + tr : tr;
+      last = tr;
+      if (allFinalSoFar && r.isFinal) fin = all;
+    }
+    const finalCount = fin ? fin.split(/\s+/).length : 0;
+    onTranscript(all, finalCount);
+  };
+  rec.onerror = e => {
+    log('rec', 'error ' + e.error + (e.message ? ' ' + e.message : ''));
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    if (e.error === 'not-allowed' && recEverStarted) {
+      // Safari sometimes refuses an automatic restart; a tap brings it back.
+      recPaused = true; setChip('speech', 'wait', 'Tap to resume'); status('Safari paused speech recognition. Tap the glasses to resume.'); return;
+    }
+    if (e.error === 'not-allowed') { recBlocked = true; setChip('speech', 'bad', 'Speech blocked'); status('Speech recognition was blocked. Allow it when Safari asks, make sure Dictation is on (Settings › General › Keyboard), then reload.', 'bad'); }
+    else if (e.error === 'service-not-allowed') { recBlocked = true; setChip('speech', 'bad', 'Speech blocked'); status('Turn on Dictation in Settings › General › Keyboard, then reload this page.', 'bad'); }
+    else if (e.error === 'audio-capture') { setChip('speech', 'bad', 'No mic'); status('Speech recognition couldn’t get the microphone. Try turning off Loudness tracking in Settings.', 'bad'); }
+    else if (e.error === 'network') { setChip('speech', 'wait', 'No network'); status('Speech recognition needs a connection right now. Retrying.', 'bad'); }
+  };
+  rec.onend = () => {
+    log('rec', 'end');
+    seg = [];
+    if (recPaused) return;
+    if (!listening || recBlocked) { setChip('speech', recBlocked ? 'bad' : 'idle', recBlocked ? 'Speech blocked' : 'Speech'); return; }
+    setChip('speech', 'wait', 'Restarting');
+    quickEnds = now() - recStartT < 1500 ? quickEnds + 1 : 0;
+    setTimeout(startRec, quickEnds > 2 ? 1200 : 60);
+  };
+}
+function startRec() {
+  if (!listening || recBlocked) return;
+  if (!rec) buildRec();
+  try { rec.start(); }
+  catch (err) {
+    if (err.name === 'InvalidStateError') return;   // already running
+    log('rec', 'start threw ' + err.name + ' ' + err.message); setTimeout(startRec, 300);
+  }
+}
+
+// Everything iOS wants "inside the tap" happens before the first await.
+async function startListening() {
+  stopDemo();
+  listening = true; recBlocked = false; recPaused = false;
+  $('btnStart').textContent = 'Stop listening'; $('btnStart').dataset.on = '1';
+  $('btnDemo').disabled = true;
+  words = []; seg = []; shoutQueue = []; shout = null; scrollInit = false; originX = 0;
+  status('Listening. Talk normally, then try raising your voice.');
+  requestWake();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (S.analysis && AC) { if (!A.ctx) A.ctx = new AC(); A.ctx.resume().catch(() => {}); }
+  if (SR) { setChip('speech', 'wait', 'Speech'); startRec(); }
+  else { setChip('speech', 'bad', 'No speech'); status('Speech recognition isn’t available in this browser. Open this page in Safari on your iPhone.', 'bad'); }
+  if (S.analysis) {
+    try { setChip('mic', 'wait', 'Mic'); await startAudio(); setChip('mic', 'ok', 'Mic'); }
+    catch (err) { log('mic', 'failed ' + err.name + ' ' + err.message); setChip('mic', 'bad', 'Mic blocked'); status('The microphone was blocked. Allow it for Safari in Settings › Apps › Safari › Microphone, then reload.', 'bad'); }
+  }
+}
+function resumeRec() {
+  if (!listening || !recPaused) return;
+  recPaused = false; setChip('speech', 'wait', 'Speech'); startRec();
+}
+function stopListening() {
+  listening = false;
+  $('btnStart').textContent = 'Start listening'; $('btnStart').dataset.on = '0';
+  $('btnDemo').disabled = false;
+  try { rec && rec.stop(); } catch (e) {}
+  stopAudio(); releaseWake();
+  setChip('mic', 'idle', 'Mic'); setChip('speech', 'idle', 'Speech');
+  status('Stopped.');
+}
+
+/* ---------------- calibration ---------------- */
+function startCalibration() {
+  if (!listening || !A.ok) { status('Start listening first, then calibrate.'); return; }
+  A.calib = { start: now(), db: [], hf: [] };
+  status('Calibrating. Talk normally for 4 seconds…');
+}
+function finishCalibration() {
+  const c = A.calib; A.calib = null;
+  if (c.db.length < 40) { status('That was too quiet to learn from. Try again and keep talking the whole time.'); return; }
+  A.voicedDb = c.db.slice(); A.voicedHf = c.hf.slice();
+  A.base = pct(c.db, 0.7); A.hfBase = pct(c.hf, 0.5);
+  status('Calibrated. Your normal voice is about ' + A.base.toFixed(0) + ' dB on this mic.');
+  log('calib', 'base ' + A.base.toFixed(1) + ' dB, hf ' + A.hfBase.toFixed(3));
+}
+
+/* ---------------- demo ---------------- */
+const DEMO = [
+  ['These', .12], ['glasses', .14], ['are', .12], ['completely', .15], ['normal.', .16], [null, 650],
+  ['Nothing', .14], ['to', .12], ['see', .15], ['here.', .18], [null, 700],
+  ['Just', .3], ['some', .3], ['words', .36], ['on', .34], ['my', .4], ['face,', .5], [null, 350],
+  ['getting', .55], ['a', .5], ['little', .6], ['louder,', .66], [null, 300],
+  ['and', .62], ['LOUDER,', .86], [null, 260], ['and', .72], ['LOUDER!', .94], [null, 380],
+  ['TAKE', 1.08], ['A', 1.04], ['BOW!', 1.2], [null, 600], ['WOW.', 1.3]
+];
+let demo = null;
+function startDemo() {
+  words = []; seg = []; shoutQueue = []; shout = null; scrollInit = false; originX = 0;
+  demo = { i: 0, next: now() + 500 };
+  $('btnDemo').textContent = 'Stop demo';
+  $('transcript').innerHTML = '<span class="ph">Demo mode: scripted words and loudness.</span>';
+}
+function stopDemo() { demo = null; $('btnDemo').textContent = 'Play demo'; }
+function tickDemo(t) {
+  while (demo && t >= demo.next) {
+    const item = DEMO[demo.i++];
+    if (!item) { stopDemo(); status('Demo finished. Tap Start listening to try it with your voice.'); return; }
+    if (item[0] === null) { demo.next = t + item[1]; continue; }
+    addWord(item[0], item[1], t, true);
+    A.demoLive = item[1]; A.demoUntil = t + 160 + item[0].length * 30;
+    demo.next = t + 230 + item[0].length * 32;
+  }
+}
+
+/* ---------------- wake lock ---------------- */
+let wake = null;
+async function requestWake() { try { if ('wakeLock' in navigator) { wake = await navigator.wakeLock.request('screen'); } } catch (e) { log('wake', 'refused'); } }
+function releaseWake() { try { wake && wake.release(); } catch (e) {} wake = null; }
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && listening) {
+    requestWake();
+    if (A.ctx) A.ctx.resume().catch(() => {});
+    if (!recBlocked) { recPaused = false; startRec(); }
+    log('vis', 'visible again');
+  }
+});
+
+/* ---------------- rendering: geometry ---------------- */
+const cv = $('glasses'), g = cv.getContext('2d');
+const src = document.createElement('canvas'), sx = src.getContext('2d', { willReadFrequently: true });
+const bgL = document.createElement('canvas'), ledL = document.createElement('canvas'), bloomA = document.createElement('canvas'), bloomB = document.createElement('canvas'), frameL = document.createElement('canvas');
+let cols = 0, rows = 0, SW = 0, SH = 0, SX = 4, SY = 10, mask = null, ring = [], box = null, lens = null, cellLit = null, dpr = 1;
+
+function lensPath(bx, by, bw, bh) {
+  const p = new Path2D();
+  const rT = bh * 0.2, rB = bh * 0.55, nw = bw * 0.075, nh = bh * 0.36, cx = bx + bw / 2;
+  p.moveTo(bx + rT, by);
+  p.lineTo(bx + bw - rT, by);
+  p.quadraticCurveTo(bx + bw, by, bx + bw, by + rT);
+  p.lineTo(bx + bw, by + bh - rB);
+  p.quadraticCurveTo(bx + bw, by + bh, bx + bw - rB * 1.3, by + bh);
+  p.lineTo(cx + nw, by + bh);
+  p.bezierCurveTo(cx + nw * 0.4, by + bh, cx + nw * 0.35, by + bh - nh, cx, by + bh - nh);
+  p.bezierCurveTo(cx - nw * 0.35, by + bh - nh, cx - nw * 0.4, by + bh, cx - nw, by + bh);
+  p.lineTo(bx + rB * 1.3, by + bh);
+  p.quadraticCurveTo(bx, by + bh, bx, by + bh - rB);
+  p.lineTo(bx, by + rT);
+  p.quadraticCurveTo(bx, by, bx + rT, by);
+  p.closePath();
+  return p;
+}
+
+function rebuild() {
+  rows = S.rows;
+  cols = Math.round(rows * ASPECT * BAR_RATIO);
+  if (S.view === 'led') { SX = 4; SY = SX * BAR_RATIO; SW = cols * SX; SH = rows * SY; }
+  else { SW = 1240; SH = Math.round(1240 / ASPECT); }
+  src.width = SW; src.height = SH;
+  for (const k in FM) delete FM[k];
+  // mask in physical units: width = cols, height = rows * BAR_RATIO
+  const mc = document.createElement('canvas').getContext('2d');
+  const mp = lensPath(0, 0, cols, rows * BAR_RATIO);
+  mask = new Uint8Array(cols * rows);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
+    mask[r * cols + c] = mc.isPointInPath(mp, c + 0.5, (r + 0.5) * BAR_RATIO) ? 1 : 0;
+  ring = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (!mask[r * cols + c]) continue;
+    const edge = r === 0 || r === rows - 1 || c === 0 || c === cols - 1 || !mask[(r - 1) * cols + c] || !mask[(r + 1) * cols + c] || !mask[r * cols + c - 1] || !mask[r * cols + c + 1];
+    if (edge) ring.push({ i: r * cols + c, a: Math.atan2((r + 0.5 - rows / 2) * BAR_RATIO, c + 0.5 - cols / 2) });
+  }
+  ring.sort((p, q) => p.a - q.a);
+  ring.forEach((p, k) => p.k = k);
+  cellLit = new Float32Array(cols * rows * 3);
+  const o = $('outRows'); if (o) o.textContent = rows + ' bars · ' + cols + ' LEDs each';
+  resize();
+}
+
+function resize() {
+  dpr = Math.min(3, window.devicePixelRatio || 1);
+  const r = cv.getBoundingClientRect();
+  const W = Math.max(200, Math.round(r.width * dpr)), H = Math.max(60, Math.round(r.height * dpr));
+  for (const c of [cv, bgL, ledL, frameL]) { c.width = W; c.height = H; }
+  bloomA.width = Math.ceil(W / 3); bloomA.height = Math.ceil(H / 3);
+  bloomB.width = Math.ceil(W / 9); bloomB.height = Math.ceil(H / 9);
+  const bw = W * 0.88, bh = bw / ASPECT;
+  box = { x: (W - bw) / 2, y: (H - bh) / 2, w: bw, h: bh };
+  lens = lensPath(box.x, box.y, box.w, box.h);
+  drawStatic(W, H);
+}
+
+function drawStatic(W, H) {
+  // background: stage + see-through slots + bars + unlit LEDs
+  const b = bgL.getContext('2d');
+  b.clearRect(0, 0, W, H);
+  b.fillStyle = '#07080c'; b.fillRect(0, 0, W, H);
+  b.save(); b.clip(lens);
+  const haze = b.createLinearGradient(0, box.y, 0, box.y + box.h);
+  haze.addColorStop(0, '#11141d'); haze.addColorStop(1, '#0a0b10');
+  b.fillStyle = haze; b.fillRect(box.x, box.y, box.w, box.h);
+  if (S.view === 'led') {
+    const px = box.w / cols, py = box.h / rows, rLed = Math.min(px * 0.4, py * 0.2);
+    for (let r = 0; r < rows; r++) {
+      b.fillStyle = '#16171d';
+      b.fillRect(box.x, box.y + r * py + py * 0.5 - py * 0.21, box.w, py * 0.42);
+    }
+    b.fillStyle = '#25262e';
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      if (!mask[r * cols + c]) continue;
+      b.beginPath(); b.arc(box.x + (c + 0.5) * px, box.y + (r + 0.5) * py, rLed * 0.8, 0, 6.2832); b.fill();
+    }
+  }
+  b.restore();
+  // frame: temples, rim, highlight
+  const f = frameL.getContext('2d');
+  f.clearRect(0, 0, W, H);
+  f.fillStyle = '#1c1e26';
+  const th = box.h * 0.12, ty = box.y + box.h * 0.12;
+  f.fillRect(box.x - box.w * 0.05, ty, box.w * 0.06, th);
+  f.fillRect(box.x + box.w * 0.99, ty, box.w * 0.06, th);
+  f.lineJoin = 'round';
+  f.strokeStyle = '#1f2129'; f.lineWidth = box.h * 0.07; f.stroke(lens);
+  f.strokeStyle = '#353845'; f.lineWidth = box.h * 0.012; f.stroke(lens);
+}
+
+/* ---------------- rendering: source (what the display "wants" to show) ---------------- */
+const FM = {};
+let fontVer = 0;
+function fontFor(kind) {
+  const key = kind + SH;
+  if (FM[key]) return FM[key];
+  const fam = kind === 'loud' ? '"Anton", Impact, "Arial Narrow", sans-serif' : '"Times New Roman", Times, serif';
+  const weight = kind === 'calmBold' ? '700 ' : '400 ';
+  sx.font = weight + '100px ' + fam;
+  const m = sx.measureText(kind === 'loud' ? 'HWQ' : 'Hgjy');
+  const asc = m.actualBoundingBoxAscent || 72, desc = m.actualBoundingBoxDescent || (kind === 'loud' ? 2 : 22);
+  const target = SH * (kind === 'loud' ? 0.92 : 0.96);
+  const size = 100 * target / (asc + desc);
+  const baseline = (SH - target) / 2 + asc * size / 100;
+  return (FM[key] = { font: weight + size.toFixed(1) + 'px ' + fam, size, baseline });
+}
+const kindOf = tier => tier === 0 ? 'calm' : tier === 1 ? 'calmBold' : 'loud';
+function ensureWidth(w) {
+  const key = w.disp + '|' + w.tier + '|' + SH + '|' + fontVer;
+  if (w.wkey === key) return;
+  sx.font = fontFor(kindOf(w.tier)).font;
+  w.width = sx.measureText(w.disp).width;
+  w.wkey = key;
+}
+
+function layout(t, dt) {
+  const space = fontFor('calm').size * 0.3;
+  let x = originX;
+  for (const w of words) { ensureWidth(w); w.x = x; x += w.width + space; }
+  if (!words.length) return;
+  const end = x - space, start = words[0].x, total = end - start, margin = SW * 0.04;
+  const target = total <= SW - 2 * margin ? start + total / 2 - SW / 2 : end - (SW - margin);
+  if (!scrollInit) { scroll = target; scrollInit = true; }
+  scroll += (target - scroll) * (1 - Math.exp(-dt / 0.09));
+  while (words.length > 1 && words[0].x + words[0].width < scroll - SW * 0.15) {
+    const w = words.shift(); originX += w.width + space;
+  }
+  const quiet = t - lastWordT > 3800 && (!listening || t - A.lastVoicedT > 1200);
+  if (quiet && !shout) {
+    fade -= dt / 0.8;
+    if (fade <= 0) { words = []; originX = 0; scrollInit = false; fade = 1; }
+  } else fade = 1;
+}
+
+function updateShout(t) {
+  if (!shout && shoutQueue.length) {
+    const w = shoutQueue.shift();
+    if (words.includes(w)) { shout = { w, start: t }; log('shout', w.text); }
+  }
+  if (shout) {
+    const hold = shoutQueue.length ? 380 : 720;
+    if (t - shout.start > hold) { shout = null; return updateShout(t); }
+  }
+  return shout;
+}
+
+function drawWord(w, t) {
+  const fm = fontFor(kindOf(w.tier));
+  const x = w.x - scroll;
+  if (x > SW || x + w.width < 0) return;
+  const age = t - w.born;
+  const enter = clamp(age / 140, 0, 1);
+  let alpha = fade * (w.final ? 1 : 0.68) * enter;
+  sx.save();
+  sx.font = fm.font;
+  sx.globalAlpha = alpha;
+  const dx = (1 - enter) * SH * 0.25;
+  if (w.tier === 0) {
+    sx.fillStyle = '#f6f6f2';
+    sx.fillText(w.disp, x + dx, fm.baseline);
+  } else if (w.tier === 1) {
+    const gr = sx.createLinearGradient(0, 0, 0, SH);
+    gr.addColorStop(0, '#ffe39a'); gr.addColorStop(1, '#ff8a2a');
+    sx.fillStyle = gr;
+    sx.fillText(w.disp, x + dx, fm.baseline);
+  } else {
+    const pop = 1 + 0.28 * clamp(1 - age / 220, 0, 1);
+    const pulse = w.tier === 2 ? 1 + 0.05 * Math.sin(t * 0.022) : 1 + 0.03 * Math.sin(t * 0.05);
+    const cx = x + dx + w.width / 2;
+    sx.translate(cx, SH / 2); sx.scale(pop * pulse, pop * pulse); sx.translate(-cx, -SH / 2);
+    const gr = sx.createLinearGradient(x, 0, x + w.width, 0);
+    if (w.tier === 2) {
+      const h0 = 315 + 25 * Math.sin(t * 0.004);
+      gr.addColorStop(0, 'hsl(' + h0 + ',100%,62%)'); gr.addColorStop(1, 'hsl(' + (h0 + 70) + ',100%,58%)');
+    } else {
+      const h0 = t * 0.4;
+      for (let i = 0; i <= 5; i++) gr.addColorStop(i / 5, 'hsl(' + ((h0 + i * 60) % 360) + ',100%,60%)');
+      sx.globalAlpha = alpha * (0.85 + 0.15 * Math.sin(t * 0.06));
+    }
+    sx.fillStyle = gr;
+    sx.fillText(w.disp, x + dx, fm.baseline);
+  }
+  sx.restore();
+}
+
+function drawShout(t, sh) {
+  const age = t - sh.start;
+  const ux = SW / cols, uy = SH / rows;
+  const rnd = mulberry(Math.floor(t / 55) * 7919 + sh.start);
+  // sparks
+  for (let i = 0; i < 18; i++) {
+    const c = hsl(rnd() * 360, 1, 0.6);
+    sx.fillStyle = 'rgb(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ')';
+    sx.fillRect(Math.floor(rnd() * cols) * ux, Math.floor(rnd() * rows) * uy, ux, uy);
+  }
+  // flash
+  const fl = RM ? 0.3 : 0.95;
+  if (age < 120) { sx.fillStyle = 'rgba(255,255,255,' + ((1 - age / 120) * fl) + ')'; sx.fillRect(0, 0, SW, SH); }
+  // fit the word
+  const fm = fontFor('loud');
+  const text = sh.w.disp;
+  sx.font = fm.font;
+  const tw = sx.measureText(text).width;
+  const fit = Math.min(1.15, (SW * 0.9) / tw);
+  // lightning in the space beside the word (or behind it if it fills the display)
+  const free = (SW - tw * fit) / 2;
+  const bolts = free > SW * 0.12 ? [free * 0.45, SW - free * 0.45] : [SW * (0.1 + rnd() * 0.15), SW * (0.75 + rnd() * 0.15)];
+  sx.lineJoin = 'miter'; sx.lineCap = 'round';
+  for (const bx0 of bolts) {
+    const pts = []; let x = bx0 + (rnd() - 0.5) * ux * 4;
+    for (let y = 0; y <= SH; y += SH / 5) { pts.push([x, y]); x += (rnd() - 0.5) * SH * 0.45; }
+    for (const [lw, col] of [[ux * 3.2, 'rgba(90,170,255,.9)'], [ux * 1.4, 'rgba(255,250,200,1)']]) {
+      sx.beginPath(); pts.forEach((p, i) => i ? sx.lineTo(p[0], p[1]) : sx.moveTo(p[0], p[1]));
+      sx.strokeStyle = col; sx.lineWidth = lw; sx.stroke();
+    }
+  }
+  // the word, letter by letter
+  const pop = 1 + 0.35 * clamp(1 - age / 170, 0, 1);
+  const shakeX = RM ? 0 : (rnd() - 0.5) * ux * 4 * clamp(1 - age / 300, 0.2, 1);
+  sx.save();
+  sx.translate(SW / 2 + shakeX, SH / 2);
+  sx.scale(fit * pop, fit * pop);
+  let x = -tw / 2;
+  const h0 = t * 0.5;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i], cw = sx.measureText(ch).width;
+    const y = fm.baseline - SH / 2 + (RM ? 0 : Math.sin(t * 0.03 + i * 1.3) * uy * 0.6);
+    const c = rnd() < 0.1 ? [255, 255, 255] : hsl(h0 + i * 48, 1, 0.58);
+    sx.fillStyle = 'rgb(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ')';
+    sx.fillText(ch, x, y);
+    x += cw;
+  }
+  sx.restore();
+}
+
+function drawIdle(t) {
+  const fm = fontFor('calm');
+  sx.font = fm.font; sx.fillStyle = 'rgba(246,246,242,0.32)';
+  const txt = 'say something';
+  sx.fillText(txt, (SW - sx.measureText(txt).width) / 2, fm.baseline);
+}
+
+function renderSource(t, dt) {
+  sx.setTransform(1, 0, 0, 1, 0, 0);
+  sx.globalAlpha = 1; sx.globalCompositeOperation = 'source-over';
+  sx.fillStyle = '#000'; sx.fillRect(0, 0, SW, SH);
+  layout(t, dt);
+  const sh = updateShout(t);
+  if (sh) drawShout(t, sh);
+  else if (words.length) for (const w of words) drawWord(w, t);
+  else if (!listening && !demo) drawIdle(t);
+}
+
+/* ---------------- rendering: the glasses ---------------- */
+function ringRGB(t, k, n) {
+  const e = A.live, tr = tierOf(e);
+  if (tr === 0) return null;
+  if (tr === 1) { const b = 0.15 + 0.45 * clamp((e - TIER[1]) / (TIER[2] - TIER[1]), 0, 1); return [255 * b, 165 * b, 55 * b]; }
+  if (tr === 2) { const p = 0.55 + 0.45 * Math.sin(t * 0.02); return hsl(318 - 30 * Math.sin(t * 0.004), 1, 0.45 * p); }
+  const on = ((k + Math.floor(t / 45)) % 4) < 2;
+  return hsl(k / n * 360 + t * 0.4, 1, on ? 0.55 : 0.12);
+}
+
+function renderGlasses(t) {
+  const W = cv.width, H = cv.height;
+  const l = ledL.getContext('2d');
+  l.clearRect(0, 0, W, H);
+  if (S.view === 'led') {
+    const img = sx.getImageData(0, 0, SW, SH).data;
+    const px = box.w / cols, py = box.h / rows, rLed = Math.min(px * 0.42, py * 0.21);
+    const n = SX * SY;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const ci = r * cols + c;
+      if (!mask[ci]) continue;
+      let ar = 0, ag = 0, ab = 0, mx = -1, mr = 0, mg = 0, mb = 0;
+      for (let y = r * SY; y < (r + 1) * SY; y++) {
+        let p = (y * SW + c * SX) * 4;
+        for (let x = 0; x < SX; x++, p += 4) {
+          const R = img[p], G = img[p + 1], B = img[p + 2];
+          ar += R; ag += G; ab += B;
+          const lum = R + G + B; if (lum > mx) { mx = lum; mr = R; mg = G; mb = B; }
+        }
+      }
+      // keep thin serif strokes alive: blend the block average with its brightest pixel
+      cellLit[ci * 3] = Math.min(255, 0.55 * mr + 1.15 * ar / n);
+      cellLit[ci * 3 + 1] = Math.min(255, 0.55 * mg + 1.15 * ag / n);
+      cellLit[ci * 3 + 2] = Math.min(255, 0.55 * mb + 1.15 * ab / n);
+    }
+    for (const p of ring) {
+      const c = ringRGB(t, p.k, ring.length); if (!c) break;
+      const i = p.i * 3;
+      cellLit[i] = Math.max(cellLit[i], c[0]); cellLit[i + 1] = Math.max(cellLit[i + 1], c[1]); cellLit[i + 2] = Math.max(cellLit[i + 2], c[2]);
+    }
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const ci = r * cols + c;
+      if (!mask[ci]) continue;
+      const R = cellLit[ci * 3], G = cellLit[ci * 3 + 1], B = cellLit[ci * 3 + 2];
+      if (R + G + B < 24) continue;
+      l.fillStyle = 'rgb(' + (R | 0) + ',' + (G | 0) + ',' + (B | 0) + ')';
+      l.beginPath(); l.arc(box.x + (c + 0.5) * px, box.y + (r + 0.5) * py, rLed, 0, 6.2832); l.fill();
+    }
+  } else {
+    l.save(); l.clip(lens);
+    l.drawImage(src, box.x, box.y, box.w, box.h);
+    const n = ring.length; const c = ringRGB(t, 0, n);
+    if (c) {
+      l.lineWidth = box.h * 0.05;
+      if (tierOf(A.live) === 3) {
+        const gr = l.createLinearGradient(box.x, 0, box.x + box.w, 0);
+        for (let i = 0; i <= 6; i++) { const q = hsl(t * 0.4 + i * 60, 1, 0.55); gr.addColorStop(i / 6, 'rgb(' + (q[0] | 0) + ',' + (q[1] | 0) + ',' + (q[2] | 0) + ')'); }
+        l.strokeStyle = gr;
+      } else l.strokeStyle = 'rgb(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ')';
+      l.stroke(lens);
+    }
+    l.restore();
+  }
+  // bloom: two-step downscale = cheap blur
+  const a = bloomA.getContext('2d'), b = bloomB.getContext('2d');
+  a.clearRect(0, 0, bloomA.width, bloomA.height); a.drawImage(ledL, 0, 0, bloomA.width, bloomA.height);
+  b.clearRect(0, 0, bloomB.width, bloomB.height); b.drawImage(bloomA, 0, 0, bloomB.width, bloomB.height);
+  g.globalCompositeOperation = 'source-over'; g.globalAlpha = 1;
+  g.drawImage(bgL, 0, 0);
+  g.globalCompositeOperation = 'lighter';
+  g.imageSmoothingEnabled = true;
+  g.globalAlpha = 0.9; g.drawImage(bloomB, 0, 0, W, H);
+  g.globalAlpha = 0.5; g.drawImage(bloomA, 0, 0, W, H);
+  g.globalAlpha = 1; g.drawImage(ledL, 0, 0);
+  g.globalCompositeOperation = 'source-over';
+  g.drawImage(frameL, 0, 0);
+}
+
+/* ---------------- UI ---------------- */
+function setChip(name, state, label) {
+  const el = $('chip' + name[0].toUpperCase() + name.slice(1));
+  el.dataset.state = state; el.lastElementChild.textContent = label;
+}
+function status(msg, tone) { const el = $('status'); el.textContent = msg; el.dataset.tone = tone || ''; }
+
+let lastUi = 0, lastTier = -1;
+function updateMeter(t) {
+  $('meterFill').style.transform = 'scaleX(' + clamp(A.live / 1.3, 0, 1).toFixed(3) + ')';
+  $('meterHeat').style.left = (clamp(A.heat / 1.3, 0, 1) * 100).toFixed(1) + '%';
+  const tr = tierOf(A.live);
+  if (tr !== lastTier) {
+    for (let i = 0; i < 4; i++) $('lab' + i).classList.toggle('on', i === tr);
+    $('meterFill').style.background = ['#eceef5', '#ffc861', '#ff3dbb', 'linear-gradient(90deg,#ff3d3d,#ffd23d,#3dff8a,#3dc5ff,#b23dff)'][tr];
+    lastTier = tr;
+  }
+  if (t - lastUi > 200 && $('settings').open) {
+    lastUi = t;
+    $('roNoise').textContent = A.ok ? A.noise.toFixed(0) + ' dB' : '—';
+    $('roBase').textContent = A.ok ? A.base.toFixed(0) + ' dB' : '—';
+    $('roLevel').textContent = A.ok ? Math.max(-99, A.db).toFixed(0) + ' dB' : '—';
+    $('roScore').textContent = A.live.toFixed(2) + ' ' + TIER_NAMES[tr];
+    $('roHeat').textContent = A.heat.toFixed(2);
+  }
+}
+
+$('btnStart').addEventListener('click', () => listening ? stopListening() : startListening());
+$('btnDemo').addEventListener('click', () => demo ? stopDemo() : startDemo());
+$('btnCal').addEventListener('click', startCalibration);
+cv.addEventListener('click', resumeRec);
+$('btnLog').addEventListener('click', () => {
+  const summary = [
+    'Caption Shades log', 'UA: ' + navigator.userAgent,
+    'settings: ' + JSON.stringify(S),
+    'noise ' + A.noise.toFixed(1) + ' dB, normal voice ' + A.base.toFixed(1) + ' dB, hfBase ' + A.hfBase.toFixed(3),
+    'lags: ' + lags.map(Math.round).join(', '), '---'
+  ].join('\n');
+  const text = summary + '\n' + LOG.join('\n');
+  const box2 = $('logBox'); box2.hidden = false; box2.value = text;
+  const done = () => { $('btnLog').textContent = 'Copied'; setTimeout(() => $('btnLog').textContent = 'Copy log', 1500); };
+  try { navigator.clipboard.writeText(text).then(done, () => { box2.focus(); box2.select(); }); }
+  catch (e) { box2.focus(); box2.select(); }
+});
+
+const inRange = $('inRange'), inRows = $('inRows');
+inRange.value = S.range; $('outRange').textContent = S.range + ' dB';
+inRows.value = S.rows;
+inRange.addEventListener('input', () => { S.range = +inRange.value; $('outRange').textContent = S.range + ' dB'; saveSettings(); });
+inRows.addEventListener('input', () => { S.rows = +inRows.value; saveSettings(); rebuild(); });
+const setView = v => { S.view = v; $('viewLed').setAttribute('aria-pressed', v === 'led'); $('viewIdeal').setAttribute('aria-pressed', v === 'ideal'); saveSettings(); rebuild(); };
+$('viewLed').addEventListener('click', () => setView('led'));
+$('viewIdeal').addEventListener('click', () => setView('ideal'));
+$('inInterim').checked = S.interim;
+$('inInterim').addEventListener('change', e => { S.interim = e.target.checked; saveSettings(); });
+$('inAnalysis').checked = S.analysis;
+$('inAnalysis').addEventListener('change', e => { S.analysis = e.target.checked; saveSettings(); if (!S.analysis) A.liveTarget = 0; });
+$('viewLed').setAttribute('aria-pressed', S.view === 'led'); $('viewIdeal').setAttribute('aria-pressed', S.view === 'ideal');
+
+window.addEventListener('resize', () => { clearTimeout(resize.t); resize.t = setTimeout(resize, 80); });
+if (document.fonts && document.fonts.load) {
+  Promise.all([document.fonts.load('400 40px "Anton"'), document.fonts.load('400 40px "Times New Roman"')])
+    .catch(() => {}).then(() => { for (const k in FM) delete FM[k]; fontVer++; });
+}
+
+/* ---------------- main loop ---------------- */
+let lastT = now();
+function frame() {
+  const t = now(), dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
+  if (listening) { analyze(t); updateBaselines(t); }
+  if (demo) tickDemo(t);
+  stepLive(dt);
+  renderSource(t, dt);
+  renderGlasses(t);
+  updateMeter(t);
+  requestAnimationFrame(frame);
+}
+
+// test hook: feed a transcript as if Safari produced it
+window.__cs = { feed: (text, finalCount) => onTranscript(text, finalCount == null ? 0 : finalCount), state: () => ({ words: words.map(w => [w.text, +w.score.toFixed(2), w.tier]), live: A.live, heat: A.heat, base: A.base, noise: A.noise, lags: lags.slice() }), log: () => LOG.slice() };
+
+rebuild();
+requestAnimationFrame(frame);
+startDemo();
+})();
+</script>
+</body>
+</html>
