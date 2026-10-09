@@ -5,6 +5,14 @@
 **Live prototype:** https://brgarst-blip.github.io/caption-shades/
 **Owner:** Brendan (GitHub `brgarst-blip`)
 
+## Auto EQ update — 2026-10-09
+
+The app now defaults to **Auto**, with **Captions** and **EQ** overrides beside the main controls. After 2.5 seconds of audible sound without words, Auto shows a 16-band microphone spectrum. Recognition remains active; any nonempty speech result (including hidden interim guesses) interrupts EQ, with a 3-second caption hold. Quiet exits EQ after 1.2 seconds. This is an experimental sound fallback, **not** music classification; environmental noise can trigger it and sung lyrics can interrupt it.
+
+The startup demo previews synthetic EQ → scripted captions → EQ. **Start listening** stops that preview and uses the microphone. FFT size is now 2048. Voice-baseline learning uses audio near recognized words instead of all loud frames; mixed music/speech can still influence calibration. Manual calibration should be done with music paused.
+
+Logs are **v3 — Auto EQ**, including mode transitions, session-start settings, threshold/mode changes and periodic audio/gate summaries. `__cs.state()` includes selected mode, active display and EQ band values. Tests: `node --test tests/auto-eq.test.cjs` (deterministic browser/audio stubs, not real-device speech validation). This section supersedes older descriptions below where they differ. Keep shipping changes from `main` to `gh-pages`.
+
 Read this file first, then `index.html` (the whole app is that one file, ~1,080 lines, no build step). Sections 2–7 were checked against the code at commit `9be0394`; section 1 is what Brendan has said about the project.
 
 ---
