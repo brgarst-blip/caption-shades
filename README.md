@@ -28,6 +28,8 @@ If Speech shows *blocked*, turn on Dictation in Settings › General › Keyboar
 
 The page opens with a **simulated** EQ → captions → EQ preview. It does not record or play audio. Select **Auto**, tap **Start listening**, and allow microphone/speech access. Play music nearby, wait about 3 seconds, then say “hello” or “can you hear me.” Captions should take over when the browser returns speech results, then the spectrum should return after the speech hold. Use **Copy log** to report the result. Desktop Chrome and iPhone Safari still need testing with real microphone audio, especially speech over music and sung lyrics.
 
+If the browser reports speech-service network errors, the app retries after 1 and 2 seconds, then pauses after the third failure and offers **Retry speech**. Microphone EQ can keep working independently. If testing inside an app’s embedded browser, paste the URL into regular Chrome or iPhone Safari. A working microphone does not prove the browser’s speech service is available. Actual speech results clear the error; merely restarting recognition does not. Stop cancels pending retries.
+
 ## How it works
 
 - Safari's speech recognition streams words as you talk.
