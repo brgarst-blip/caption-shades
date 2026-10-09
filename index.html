@@ -99,6 +99,7 @@ summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:in
       <span class="chip" id="chipMic" data-state="idle"><i></i><span>Mic</span></span>
       <span class="chip" id="chipSpeech" data-state="idle"><i></i><span>Speech</span></span>
       <span class="chip" id="chipLag" data-state="idle"><i></i><span>Lag —</span></span>
+      <span class="chip" id="chipMode" data-state="idle"><i></i><span>Auto · ready</span></span>
     </div>
   </header>
 
@@ -113,8 +114,17 @@ summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:in
     <button id="btnStart" type="button">Start listening</button>
     <button id="btnDemo" type="button">Play demo</button>
   </div>
+  <div class="row">
+    <span class="lab" id="labMode">Mode</span>
+    <div class="seg" role="group" aria-labelledby="labMode">
+      <button type="button" id="modeAuto" aria-pressed="true">Auto</button>
+      <button type="button" id="modeCaptions" aria-pressed="false">Captions</button>
+      <button type="button" id="modeEq" aria-pressed="false">EQ</button>
+    </div>
+    <small>Auto shows EQ after 2½ seconds of sound without words. Talk to bring captions back; EQ returns 3 seconds after the last speech result. Other room sounds can also trigger EQ.</small>
+  </div>
   <p class="status" id="status">Playing the demo. Tap Start listening, allow the microphone and speech recognition, then talk.</p>
-  <div class="transcript" id="transcript"><span class="ph">Your words show up here as Safari hears them.</span></div>
+  <div class="transcript" id="transcript"><span class="ph">Your words show up here as the browser hears them.</span></div>
 
   <details id="settings">
     <summary>Settings and diagnostics</summary>
@@ -122,7 +132,7 @@ summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:in
       <div class="row">
         <label for="inRange">Shout threshold</label><output id="outRange">16 dB</output>
         <input id="inRange" type="range" min="8" max="30" step="1" value="16">
-        <small>How much louder than your normal voice counts as a full shout. Lower is more trigger-happy.</small>
+        <small>How much louder than your normal voice counts as a full shout. Left = more sensitive. Right = less sensitive. This does not change EQ sensitivity.</small>
       </div>
       <div class="row">
         <span class="lab" id="labFlow">Words</span>
@@ -157,19 +167,19 @@ summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:in
       </div>
       <div class="row">
         <label for="inInterim">Show early guesses</label><input id="inInterim" type="checkbox" checked>
-        <small>Draws words the moment Safari guesses them, slightly dimmed, then locks them in. Turn off to compare the lag.</small>
+        <small>Draws words the moment the browser guesses them, slightly dimmed, then locks them in. Turn off to compare the lag.</small>
       </div>
       <div class="row">
         <label for="inCursor">Typing cursor</label><input id="inCursor" type="checkbox" checked>
         <small>Shows a cursor the moment you start talking, colored by how loud you are, so the glasses react before the words arrive.</small>
       </div>
       <div class="row">
-        <label for="inAnalysis">Loudness tracking</label><input id="inAnalysis" type="checkbox" checked>
-        <small>Turn off to test captions on their own if the mic level and speech fight each other.</small>
+        <label for="inAnalysis">Audio analysis / EQ</label><input id="inAnalysis" type="checkbox" checked>
+        <small>Required for live EQ and loudness tracking. Turn off to test captions alone if microphone analysis and speech recognition conflict.</small>
       </div>
       <div class="row">
         <span class="lab">Calibrate your normal voice</span><button type="button" class="small" id="btnCal">Calibrate</button>
-        <small>While listening, tap and talk normally for 4 seconds. It also learns on its own as you talk.</small>
+        <small>While listening, pause the music, tap and talk normally for 4 seconds. Automatic learning uses audio near recognized words; it cannot separate your voice from music playing at the same time.</small>
       </div>
     </div>
     <div class="readouts" aria-live="off">
@@ -182,7 +192,7 @@ summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:in
     </div>
     <div class="row">
       <span class="lab">Session log</span><button type="button" class="small" id="btnLog">Copy log</button>
-      <small>Copies timings and events so you can paste them back to Claude for tuning.</small>
+      <small>Copies timings, EQ transitions and setting changes so you can share them for tuning. Auto EQ is an experimental sound fallback, not a music classifier.</small>
     </div>
     <textarea id="logBox" readonly hidden aria-label="Session log"></textarea>
     <p class="help"><b>If Speech shows blocked:</b> turn on Dictation in Settings › General › Keyboard, allow the microphone for Safari, then reload. Use Safari itself, not a home-screen shortcut.</p>
@@ -198,7 +208,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const RM = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ---------------- settings ---------------- */
-const DEFAULTS = { range: 16, rows: 14, led: 'fine', flow: 'scroll', view: 'led', interim: true, cursor: true, analysis: true };
+const DEFAULTS = { range: 16, rows: 14, led: 'fine', flow: 'scroll', view: 'led', interim: true, cursor: true, analysis: true, mode: 'auto' };
 const S = Object.assign({}, DEFAULTS);
 try { Object.assign(S, JSON.parse(localStorage.getItem('caption-shades') || '{}')); } catch (e) {}
 const saveSettings = () => { try { localStorage.setItem('caption-shades', JSON.stringify(S)); } catch (e) {} };
@@ -220,6 +230,7 @@ const MIN_GAP_MM = 1.0;  // narrowest slot a board maker will reliably cut
 S.rows = clamp(Math.round(+S.rows) || DEFAULTS.rows, 6, 20);
 if (!LEDS[S.led]) S.led = DEFAULTS.led;
 if (!['scroll', 'pop', 'single'].includes(S.flow)) S.flow = DEFAULTS.flow;
+if (!['auto', 'captions', 'eq'].includes(S.mode)) S.mode = DEFAULTS.mode;
 const led = () => LEDS[S.led];
 
 /* ---------------- log ---------------- */
@@ -252,20 +263,131 @@ const A = {
   noise: -70, base: -36, hfBase: 0.12, lastBaseT: 0,
   live: 0, liveTarget: 0, heat: 0, db: -100, hf: 0,
   lastVoicedT: -1e9, onsetT: 0, firstWordPending: false,
-  cursor: 0, calib: null, demoUntil: 0
+  cursor: 0, calib: null, demoUntil: 0, lastLearnT: -1e9, source: null, mute: null, generation: 0
 };
 
+/* EQ is a sound-without-transcription fallback, not a music classifier.
+   Recognition stays running throughout; only the display changes. */
+const EQ = {
+  bands: 16, levels: new Float32Array(16), targets: new Float32Array(16), peaks: new Float32Array(16),
+  active: false, soundMs: 0, lastSoundT: -1e9, lastSpeechT: -1e9,
+  lastSampleT: 0, lastReportT: 0, peakDb: -48, label: ''
+};
+const EQ_ENTER_MS = 2500, CAPTION_HOLD_MS = 3000, EQ_QUIET_MS = 1200;
+
+function setEq(active, reason) {
+  if (EQ.active === active) return;
+  EQ.active = active;
+  if (active) {
+    words = []; shoutQueue = []; shout = null; originX = 0; scrollInit = false; fade = 1;
+  } else {
+    // Background sound must not carry a sustained-shout heat bonus into speech.
+    A.heat = 0;
+  }
+  log('mode', (active ? 'eq' : 'captions') + ' — ' + reason);
+}
+
+function resetEq(reason) {
+  setEq(false, reason);
+  EQ.soundMs = 0; EQ.lastSoundT = EQ.lastSpeechT = -1e9;
+  EQ.lastSampleT = 0; EQ.peakDb = -48;
+  EQ.levels.fill(0); EQ.targets.fill(0); EQ.peaks.fill(0);
+}
+
+function noteSpeech(t) {
+  EQ.lastSpeechT = t;
+  if (S.mode !== 'eq') setEq(false, 'speech result');
+  if (!S.analysis || !A.ok || A.calib) return;
+  // Learn only the preceding second associated with a recognition result.
+  // This limits music-only drift, but is not voice/music source separation.
+  for (const f of A.frames) {
+    if (!f.voiced || f.t <= A.lastLearnT || f.t < t - 1200 || f.t > t - 150) continue;
+    A.voicedDb.push(f.db); A.voicedHf.push(f.hf); A.lastLearnT = f.t;
+  }
+  if (A.voicedDb.length > 1500) A.voicedDb.splice(0, A.voicedDb.length - 1500);
+  if (A.voicedHf.length > 1500) A.voicedHf.splice(0, A.voicedHf.length - 1500);
+}
+
+function sampleEq(t, db) {
+  const dt = EQ.lastSampleT ? Math.min(100, t - EQ.lastSampleT) : 0;
+  if (EQ.lastSampleT && t - EQ.lastSampleT > 500) EQ.soundMs = 0;
+  EQ.lastSampleT = t;
+  // Cap the ambient gate so sustained music cannot teach itself to be silence.
+  const gate = clamp(A.noise + 6, -65, -48);
+  const audible = db > gate;
+  if (audible) { EQ.soundMs = Math.min(EQ_ENTER_MS, EQ.soundMs + dt); EQ.lastSoundT = t; }
+  else if (t - EQ.lastSoundT > 400) EQ.soundMs = Math.max(0, EQ.soundMs - dt * 2);
+  const binHz = A.ctx.sampleRate / A.analyser.fftSize;
+  const topHz = Math.min(12000, A.ctx.sampleRate / 2);
+  const bandDb = [];
+  for (let b = 0; b < EQ.bands; b++) {
+    const low = 60 * Math.pow(topHz / 60, b / EQ.bands);
+    const high = 60 * Math.pow(topHz / 60, (b + 1) / EQ.bands);
+    const start = Math.max(1, Math.floor(low / binHz));
+    const end = Math.min(A.fd.length, Math.max(start + 1, Math.ceil(high / binHz)));
+    let power = 0;
+    for (let i = start; i < end; i++) power += Math.pow(10, A.fd[i] / 10);
+    bandDb.push(10 * Math.log10(power / Math.max(1, end - start) + 1e-12));
+  }
+  const peak = Math.max(-70, ...bandDb);
+  EQ.peakDb = Math.max(peak, EQ.peakDb - dt * 0.004);
+  for (let b = 0; b < EQ.bands; b++) {
+    EQ.targets[b] = audible ? clamp((bandDb[b] - (EQ.peakDb - 42)) / 42, 0, 1) : 0;
+  }
+  if (t - EQ.lastReportT > 5000) {
+    EQ.lastReportT = t;
+    log('audio', db.toFixed(1) + ' dB, EQ gate ' + gate.toFixed(1) + ', sound ' + Math.round(EQ.soundMs) + ' ms');
+  }
+}
+
+function updateEq(t, dt) {
+  const preview = demo && demo.phase !== 'words' && S.mode !== 'captions';
+  if (listening && A.ok && S.analysis) {
+    if (S.mode === 'captions' || A.calib) setEq(false, A.calib ? 'voice calibration' : 'caption mode selected');
+    else if (S.mode === 'eq') setEq(true, 'EQ mode selected');
+    else if (t - EQ.lastSpeechT < CAPTION_HOLD_MS) setEq(false, 'recent speech');
+    else if (t - EQ.lastSoundT > EQ_QUIET_MS) setEq(false, 'quiet');
+    else if (EQ.soundMs >= EQ_ENTER_MS) setEq(true, 'sound without words');
+  } else {
+    setEq(!!preview, preview ? 'scripted EQ preview' : 'audio inactive');
+    if (!preview) EQ.targets.fill(0);
+  }
+  if (preview) {
+    // Clearly labeled synthetic preview; live mode always uses microphone bins.
+    for (let b = 0; b < EQ.bands; b++) {
+      EQ.targets[b] = clamp(0.3 + 0.24 * Math.sin(t * 0.003 + b * 0.65) +
+        0.28 * Math.pow(0.5 + 0.5 * Math.sin(t * 0.011 - b * 0.35), 3), 0, 1);
+    }
+  }
+  for (let b = 0; b < EQ.bands; b++) {
+    const tau = RM ? 0.25 : EQ.targets[b] > EQ.levels[b] ? 0.045 : 0.22;
+    EQ.levels[b] += (EQ.targets[b] - EQ.levels[b]) * (1 - Math.exp(-dt / tau));
+    EQ.peaks[b] = Math.max(EQ.levels[b], EQ.peaks[b] - dt * 0.35);
+  }
+  const prefix = S.mode === 'auto' ? 'Auto · ' : '';
+  const label = demo ? (EQ.active ? 'Demo · EQ' : 'Demo · captions') :
+    prefix + (!listening ? 'ready' : !S.analysis ? 'analysis off' : !A.ok ? 'no audio' : EQ.active ? 'EQ' : 'captions');
+  if (label !== EQ.label) {
+    EQ.label = label;
+    setChip('mode', EQ.active ? 'ok' : listening ? 'wait' : 'idle', label);
+  }
+}
+
 async function startAudio() {
+  const generation = ++A.generation;
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!A.ctx) A.ctx = new AC();
   await A.ctx.resume();
-  A.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  if (generation !== A.generation || !listening || !S.analysis) { stream.getTracks().forEach(tr => tr.stop()); return; }
+  A.stream = stream;
   const src = A.ctx.createMediaStreamSource(A.stream);
   A.analyser = A.ctx.createAnalyser();
-  A.analyser.fftSize = 1024;
+  A.analyser.fftSize = 2048;
   A.analyser.smoothingTimeConstant = 0;
   const mute = A.ctx.createGain(); mute.gain.value = 0;   // keeps Safari pulling audio through the graph
   src.connect(A.analyser); A.analyser.connect(mute); mute.connect(A.ctx.destination);
+  A.source = src; A.mute = mute;
   A.td = new Float32Array(A.analyser.fftSize);
   A.fd = new Float32Array(A.analyser.frequencyBinCount);
   A.ok = true;
@@ -277,8 +399,15 @@ async function startAudio() {
   log('mic', 'started, ' + A.ctx.sampleRate + ' Hz');
 }
 function stopAudio() {
+  A.generation++;
   if (A.stream) A.stream.getTracks().forEach(t => t.stop());
+  if (A.source) A.source.disconnect();
+  if (A.analyser) A.analyser.disconnect();
+  if (A.mute) A.mute.disconnect();
+  A.source = A.mute = null;
   A.stream = null; A.ok = false;
+  A.liveTarget = 0; A.calib = null;
+  resetEq('audio stopped');
 }
 
 function analyze(t) {
@@ -287,6 +416,7 @@ function analyze(t) {
   let sum = 0; for (let i = 0; i < A.td.length; i++) sum += A.td[i] * A.td[i];
   const db = 20 * Math.log10(Math.sqrt(sum / A.td.length) + 1e-9);
   A.analyser.getFloatFrequencyData(A.fd);
+  sampleEq(t, db);
   const binHz = A.ctx.sampleRate / A.analyser.fftSize;
   let lo = 0, hi = 0;
   const i0 = Math.floor(150 / binHz), i1 = Math.min(A.fd.length, Math.ceil(6000 / binHz)), i2 = Math.floor(2000 / binHz);
@@ -306,14 +436,12 @@ function pushFrame(t, db, hf) {
   const voiced = db > Math.max(A.noise + 9, -62);
   let s = 0;
   if (voiced) {
-    A.voicedDb.push(db); if (A.voicedDb.length > 1500) A.voicedDb.shift();
-    A.voicedHf.push(hf); if (A.voicedHf.length > 1500) A.voicedHf.shift();
     if (A.calib) { A.calib.db.push(db); A.calib.hf.push(hf); }
     s = scoreOf(db, hf);
     if (t - A.lastVoicedT > 650) { A.onsetT = t; A.firstWordPending = true; log('onset', db.toFixed(1) + ' dB'); }
     A.lastVoicedT = t;
   }
-  A.frames.push({ t, voiced, s });
+  A.frames.push({ t, voiced, s, db, hf });
   while (A.frames.length && A.frames[0].t < t - 8000) A.frames.shift();
   A.liveTarget = s;
 }
@@ -323,7 +451,7 @@ function updateBaselines(t) {
   A.lastBaseT = t;
   if (A.allDb.length > 60) A.noise = clamp(pct(A.allDb, 0.15), -90, -20);
   if (A.voicedDb.length > 90) {
-    A.base = Math.max(pct(A.voicedDb, 0.7), A.noise + 8);  // 70th percentile ~ a typical word peak
+    A.base = pct(A.voicedDb, 0.7);  // only audio associated with recognized speech
     A.hfBase = pct(A.voicedHf, 0.5);
   }
   if (A.calib && t - A.calib.start > 4000) finishCalibration();
@@ -377,6 +505,7 @@ function addWord(text, score, t, final) {
 function onTranscript(text, finalCount) {
   const t = now();
   const toks = text.trim().split(/\s+/).filter(Boolean);
+  if (toks.length) noteSpeech(t);
   const oldLen = seg.length;
   const k = Math.max(0, toks.length - oldLen);
   const scores = k ? (S.analysis && A.ok ? newScores(k, t) : Array(k).fill(0.15)) : [];
@@ -437,6 +566,8 @@ function buildRec() {
     for (let i = 0; i < e.results.length; i++) {
       const r = e.results[i], tr = r[0].transcript.trim();
       if (!tr) continue;
+      // Even hidden early guesses reserve the screen for incoming captions.
+      if (i >= (e.resultIndex || 0)) noteSpeech(now());
       if (!r.isFinal) allFinalSoFar = false;
       if (!S.interim && !r.isFinal) continue;
       const nt = norm(tr);
@@ -488,15 +619,21 @@ async function startListening() {
   $('btnStart').textContent = 'Stop listening'; $('btnStart').dataset.on = '1';
   $('btnDemo').disabled = true;
   words = []; seg = []; shoutQueue = []; shout = null; scrollInit = false; originX = 0;
-  status('Listening. Talk normally, then try raising your voice.');
+  resetEq('listening started');
+  A.frames = []; A.allDb = []; A.lastVoicedT = -1e9; A.firstWordPending = false;
+  A.live = A.heat = 0; A.cursor = now();
+  log('settings', JSON.stringify(S));
+  $('transcript').innerHTML = '<span class="ph">Listening for your words…</span>';
+  status(S.mode === 'auto' ? 'Listening. Auto shows EQ for sound without words; talk to bring captions back.' :
+    S.mode === 'eq' ? 'Listening. EQ stays on; recognized words appear in the transcript below.' : 'Listening. Talk normally, then try raising your voice.');
   requestWake();
   const AC = window.AudioContext || window.webkitAudioContext;
   if (S.analysis && AC) { if (!A.ctx) A.ctx = new AC(); A.ctx.resume().catch(() => {}); }
   if (SR) { setChip('speech', 'wait', 'Speech'); startRec(); }
   else { setChip('speech', 'bad', 'No speech'); status('Speech recognition isn’t available in this browser. Open this page in Safari on your iPhone.', 'bad'); }
   if (S.analysis) {
-    try { setChip('mic', 'wait', 'Mic'); await startAudio(); setChip('mic', 'ok', 'Mic'); }
-    catch (err) { log('mic', 'failed ' + err.name + ' ' + err.message); setChip('mic', 'bad', 'Mic blocked'); status('The microphone was blocked. Allow it for Safari in Settings › Apps › Safari › Microphone, then reload.', 'bad'); }
+    try { setChip('mic', 'wait', 'Mic'); await startAudio(); if (A.ok) setChip('mic', 'ok', 'Mic'); }
+    catch (err) { if (!listening || !S.analysis) return; log('mic', 'failed ' + err.name + ' ' + err.message); setChip('mic', 'bad', 'Mic blocked'); status('The microphone was unavailable. Check this site’s microphone permission, then stop and start listening to retry.', 'bad'); }
   }
 }
 function resumeRec() {
@@ -540,15 +677,27 @@ const DEMO = [
 let demo = null;
 function startDemo() {
   words = []; seg = []; shoutQueue = []; shout = null; scrollInit = false; originX = 0;
-  demo = { i: 0, next: now() + 500 };
+  resetEq('demo started');
+  demo = { i: 0, phase: S.mode === 'captions' ? 'words' : 'intro', next: now() + (S.mode === 'captions' ? 500 : S.mode === 'eq' ? 12000 : 4500) };
   $('btnDemo').textContent = 'Stop demo';
-  $('transcript').innerHTML = '<span class="ph">Demo mode: scripted words and loudness.</span>';
+  $('transcript').innerHTML = '<span class="ph">Demo preview: simulated EQ and scripted words. No microphone audio.</span>';
+  status('Demo preview. Tap Start listening to try Auto EQ with music and your own voice.');
 }
-function stopDemo() { demo = null; $('btnDemo').textContent = 'Play demo'; }
+function stopDemo() { demo = null; resetEq('demo stopped'); $('btnDemo').textContent = 'Play demo'; }
 function tickDemo(t) {
   while (demo && t >= demo.next) {
+    if (demo.phase === 'outro' || S.mode === 'eq') {
+      stopDemo(); status('Demo finished. Tap Start listening to try Auto EQ with your voice.'); return;
+    }
+    if (demo.phase === 'intro') {
+      demo.phase = 'words'; demo.next = t + 400; setEq(false, 'scripted captions'); return;
+    }
     const item = DEMO[demo.i++];
-    if (!item) { stopDemo(); status('Demo finished. Tap Start listening to try it with your voice.'); return; }
+    if (!item) {
+      if (S.mode === 'auto') { demo.phase = 'outro'; demo.next = t + 4500; }
+      else { stopDemo(); status('Demo finished. Tap Start listening to try it with your voice.'); }
+      return;
+    }
     if (item[0] === null) { demo.next = t + item[1]; continue; }
     addWord(item[0], item[1], t, true);
     A.demoLive = item[1]; A.demoUntil = t + 160 + item[0].length * 30;
@@ -900,6 +1049,7 @@ function renderSource(t, dt) {
   sx.setTransform(1, 0, 0, 1, 0, 0);
   sx.globalAlpha = 1; sx.globalCompositeOperation = 'source-over';
   sx.fillStyle = '#000'; sx.fillRect(0, 0, SW, SH);
+  if (EQ.active) { drawEq(); return; }
   layout(t, dt);
   const sh = updateShout(t);
   if (sh) drawShout(t, sh);
@@ -910,8 +1060,30 @@ function renderSource(t, dt) {
   }
 }
 
+function drawEq() {
+  // Frequency increases left to right. Snap bars to whole LED columns/rows.
+  const ux = SW / cols, uy = SH / rows;
+  for (let b = 0; b < EQ.bands; b++) {
+    const first = Math.floor(b * cols / EQ.bands);
+    const end = Math.floor((b + 1) * cols / EQ.bands) - 1;
+    const height = Math.round(EQ.levels[b] * rows);
+    const hue = 175 + b / (EQ.bands - 1) * 145;
+    const width = Math.max(1, end - first) * ux;
+    for (let r = 0; r < height; r++) {
+      sx.fillStyle = 'hsl(' + (hue + r * 2) + ',95%,' + (48 + r / rows * 16) + '%)';
+      sx.fillRect(first * ux, SH - (r + 1) * uy, width, uy * (S.view === 'led' ? 1 : 0.82));
+    }
+    const peak = Math.round(EQ.peaks[b] * rows);
+    if (!RM && peak > height && peak > 0) {
+      sx.fillStyle = 'hsl(' + hue + ',80%,80%)';
+      sx.fillRect(first * ux, SH - peak * uy, width, uy * 0.45);
+    }
+  }
+}
+
 /* ---------------- rendering: the glasses ---------------- */
 function ringRGB(t, k, n) {
+  if (EQ.active) return null;
   const e = A.live, tr = tierOf(e);
   if (tr === 0) return null;
   if (tr === 1) { const b = 0.15 + 0.45 * clamp((e - TIER[1]) / (TIER[2] - TIER[1]), 0, 1); return [255 * b, 165 * b, 55 * b]; }
@@ -1021,8 +1193,9 @@ $('btnCal').addEventListener('click', startCalibration);
 cv.addEventListener('click', resumeRec);
 $('btnLog').addEventListener('click', () => {
   const summary = [
-    'Caption Shades log v2', 'UA: ' + navigator.userAgent,
+    'Caption Shades log v3 — Auto EQ', 'UA: ' + navigator.userAgent,
     'settings: ' + JSON.stringify(S),
+    'display: ' + (EQ.active ? 'eq' : 'captions') + ', auto rule: sound 2500 ms / speech hold 3000 ms / quiet 1200 ms',
     'noise ' + A.noise.toFixed(1) + ' dB, normal voice ' + A.base.toFixed(1) + ' dB, hfBase ' + A.hfBase.toFixed(3),
     'lags: ' + lags.map(Math.round).join(', '), '---'
   ].join('\n');
@@ -1037,21 +1210,33 @@ const inRange = $('inRange'), inRows = $('inRows');
 inRange.value = S.range; $('outRange').textContent = S.range + ' dB';
 inRows.value = S.rows;
 inRange.addEventListener('input', () => { S.range = +inRange.value; $('outRange').textContent = S.range + ' dB'; saveSettings(); });
+inRange.addEventListener('change', () => log('setting', 'range=' + S.range + ' dB (lower = more sensitive)'));
 inRows.addEventListener('input', () => { S.rows = +inRows.value; saveSettings(); rebuild(); });
 function bindSeg(key, ids, after) {
   const sync = () => { for (const v in ids) $(ids[v]).setAttribute('aria-pressed', S[key] === v); };
-  for (const v in ids) $(ids[v]).addEventListener('click', () => { S[key] = v; saveSettings(); sync(); after(); });
+  for (const v in ids) $(ids[v]).addEventListener('click', () => { S[key] = v; log('setting', key + '=' + v); saveSettings(); sync(); after(); });
   sync();
 }
 bindSeg('view', { led: 'viewLed', ideal: 'viewIdeal' }, rebuild);
 bindSeg('led', { fine: 'ledFine', bright: 'ledBright' }, rebuild);
 bindSeg('flow', { scroll: 'flowScroll', pop: 'flowPop', single: 'flowSingle' }, () => { scrollInit = false; });
+bindSeg('mode', { auto: 'modeAuto', captions: 'modeCaptions', eq: 'modeEq' }, () => {
+  if (demo) startDemo();
+  if (listening && !S.analysis && S.mode !== 'captions') status('Turn on Audio analysis / EQ to use the live equalizer.');
+});
 $('inInterim').checked = S.interim;
 $('inInterim').addEventListener('change', e => { S.interim = e.target.checked; saveSettings(); });
 $('inCursor').checked = S.cursor;
 $('inCursor').addEventListener('change', e => { S.cursor = e.target.checked; saveSettings(); });
 $('inAnalysis').checked = S.analysis;
-$('inAnalysis').addEventListener('change', e => { S.analysis = e.target.checked; saveSettings(); if (!S.analysis) A.liveTarget = 0; });
+$('inAnalysis').addEventListener('change', async e => {
+  S.analysis = e.target.checked; saveSettings(); log('setting', 'analysis=' + S.analysis);
+  if (!S.analysis) { stopAudio(); setChip('mic', 'idle', 'Analysis off'); }
+  else if (listening) {
+    try { setChip('mic', 'wait', 'Mic'); await startAudio(); if (A.ok) setChip('mic', 'ok', 'Mic'); }
+    catch (err) { if (!listening || !S.analysis) return; setChip('mic', 'bad', 'Mic unavailable'); log('mic', 'failed ' + err.name); status('Microphone analysis could not start. Check this site’s microphone permission and try again.', 'bad'); }
+  }
+});
 
 window.addEventListener('resize', () => { clearTimeout(resize.t); resize.t = setTimeout(resize, 80); });
 if (document.fonts && document.fonts.load) {
@@ -1065,6 +1250,7 @@ function frame() {
   const t = now(), dt = Math.min(0.1, (t - lastT) / 1000); lastT = t;
   if (listening) { analyze(t); updateBaselines(t); }
   if (demo) tickDemo(t);
+  updateEq(t, dt);
   stepLive(dt);
   renderSource(t, dt);
   renderGlasses(t);
@@ -1073,7 +1259,7 @@ function frame() {
 }
 
 // test hook: feed a transcript as if Safari produced it
-window.__cs = { feed: (text, finalCount) => onTranscript(text, finalCount == null ? 0 : finalCount), state: () => ({ words: words.map(w => [w.text, +w.score.toFixed(2), w.tier]), live: A.live, heat: A.heat, base: A.base, noise: A.noise, lags: lags.slice() }), log: () => LOG.slice() };
+window.__cs = { feed: (text, finalCount) => onTranscript(text, finalCount == null ? 0 : finalCount), state: () => ({ words: words.map(w => [w.text, +w.score.toFixed(2), w.tier]), live: A.live, heat: A.heat, base: A.base, noise: A.noise, mode: S.mode, display: EQ.active ? 'eq' : 'captions', eq: Array.from(EQ.levels), lags: lags.slice() }), log: () => LOG.slice() };
 
 rebuild();
 requestAnimationFrame(frame);
