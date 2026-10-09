@@ -67,6 +67,8 @@ summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:in
 .row label,.row .lab{font-weight:600}
 .row output{font:500 13px/1 var(--font-mono);color:var(--warm);font-variant-numeric:tabular-nums}
 .row small{grid-column:1 / -1;color:var(--muted);font-size:13px}
+.row small.info{color:var(--warm);font:500 12px/1.4 var(--font-mono)}
+.row small.info[data-tone="bad"]{color:var(--bad)}
 .row input[type="range"]{grid-column:1 / -1;width:100%;accent-color:var(--warm)}
 .row input[type="checkbox"]{width:22px;height:22px;accent-color:var(--warm)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
@@ -123,9 +125,27 @@ summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:in
         <small>How much louder than your normal voice counts as a full shout. Lower is more trigger-happy.</small>
       </div>
       <div class="row">
+        <span class="lab" id="labFlow">Words</span>
+        <div class="seg" role="group" aria-labelledby="labFlow">
+          <button type="button" id="flowScroll" aria-pressed="true">Scroll</button>
+          <button type="button" id="flowPop" aria-pressed="false">Pop on</button>
+          <button type="button" id="flowSingle" aria-pressed="false">One word</button>
+        </div>
+        <small>Scroll slides the line left as you talk. Pop on drops each word in place and starts a fresh line when it fills up or you pause. One word shows each word on its own.</small>
+      </div>
+      <div class="row">
         <label for="inRows">LED bars</label><output id="outRows">14 bars</output>
-        <input id="inRows" type="range" min="8" max="24" step="1" value="14">
+        <input id="inRows" type="range" min="6" max="20" step="1" value="14">
+        <small class="info" id="rowsInfo">78 across · 1,020 LEDs · 57% see-through · 1.8 mm gaps</small>
         <small>Rows of LEDs on the grille. More bars means sharper text but less to see through.</small>
+      </div>
+      <div class="row">
+        <span class="lab" id="labLed">LED size</span>
+        <div class="seg" role="group" aria-labelledby="labLed">
+          <button type="button" id="ledFine" aria-pressed="true">1 mm</button>
+          <button type="button" id="ledBright" aria-pressed="false">1.6 mm bright</button>
+        </div>
+        <small>1 mm LEDs fit 78 across for sharper text. 1.6 mm LEDs are about twice as bright but fit 66 across on wider bars. A phone screen can’t show the brightness difference.</small>
       </div>
       <div class="row">
         <span class="lab" id="labView">Display</span>
@@ -138,6 +158,10 @@ summary{cursor:pointer;padding:14px 0 8px;font-weight:600;list-style-position:in
       <div class="row">
         <label for="inInterim">Show early guesses</label><input id="inInterim" type="checkbox" checked>
         <small>Draws words the moment Safari guesses them, slightly dimmed, then locks them in. Turn off to compare the lag.</small>
+      </div>
+      <div class="row">
+        <label for="inCursor">Typing cursor</label><input id="inCursor" type="checkbox" checked>
+        <small>Shows a cursor the moment you start talking, colored by how loud you are, so the glasses react before the words arrive.</small>
       </div>
       <div class="row">
         <label for="inAnalysis">Loudness tracking</label><input id="inAnalysis" type="checkbox" checked>
@@ -174,7 +198,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const RM = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ---------------- settings ---------------- */
-const DEFAULTS = { range: 16, rows: 14, view: 'led', interim: true, analysis: true };
+const DEFAULTS = { range: 16, rows: 14, led: 'fine', flow: 'scroll', view: 'led', interim: true, cursor: true, analysis: true };
 const S = Object.assign({}, DEFAULTS);
 try { Object.assign(S, JSON.parse(localStorage.getItem('caption-shades') || '{}')); } catch (e) {}
 const saveSettings = () => { try { localStorage.setItem('caption-shades', JSON.stringify(S)); } catch (e) {} };
@@ -185,7 +209,18 @@ const TIER = [0, 0.45, 0.70, 1.0];
 const TIER_NAMES = ['calm', 'raised', 'loud', 'shout'];
 const tierOf = v => v >= TIER[3] ? 3 : v >= TIER[2] ? 2 : v >= TIER[1] ? 1 : 0;
 const ASPECT = 3.1;      // glasses front: width / height
-const BAR_RATIO = 2.5;   // vertical bar pitch / horizontal LED pitch (dense across, sparse down)
+const FRONT_MM = 140;    // width of the glasses front
+/* Buildable LED options. LEDs across is fixed by how tightly they can sit side by side.
+   Each row of LEDs sits on a bar; the gaps between bars are what you see through. */
+const LEDS = {
+  fine:   { across: 78, size: 1.0, bar: 1.4 },   // 1 x 1 mm, 5 mA per color
+  bright: { across: 66, size: 1.6, bar: 1.9 }    // 1.6 x 1.5 mm, 12 mA per color
+};
+const MIN_GAP_MM = 1.0;  // narrowest slot a board maker will reliably cut
+S.rows = clamp(Math.round(+S.rows) || DEFAULTS.rows, 6, 20);
+if (!LEDS[S.led]) S.led = DEFAULTS.led;
+if (!['scroll', 'pop', 'single'].includes(S.flow)) S.flow = DEFAULTS.flow;
+const led = () => LEDS[S.led];
 
 /* ---------------- log ---------------- */
 const LOG = []; const T0 = now();
@@ -331,7 +366,7 @@ let lastWordT = -1e9, originX = 0, scroll = 0, scrollInit = false, fade = 1;
 const lags = [];
 
 function addWord(text, score, t, final) {
-  const w = { text, score, tier: tierOf(score), born: t, final, width: 0, wkey: '' };
+  const w = { text, score, tier: tierOf(score), born: t, final, width: 0, fit: 1, wkey: '', gapBefore: t - lastWordT };
   w.disp = w.tier >= 2 ? text.toUpperCase() : text;
   words.push(w);
   lastWordT = t; fade = 1;
@@ -539,6 +574,7 @@ const cv = $('glasses'), g = cv.getContext('2d');
 const src = document.createElement('canvas'), sx = src.getContext('2d', { willReadFrequently: true });
 const bgL = document.createElement('canvas'), ledL = document.createElement('canvas'), bloomA = document.createElement('canvas'), bloomB = document.createElement('canvas'), frameL = document.createElement('canvas');
 let cols = 0, rows = 0, SW = 0, SH = 0, SX = 4, SY = 10, mask = null, ring = [], box = null, lens = null, cellLit = null, dpr = 1;
+let barRatio = 2.5, mm = 1, ledCount = 0;   // vertical bar pitch / LED pitch; screen pixels per millimeter
 
 function lensPath(bx, by, bw, bh) {
   const p = new Path2D();
@@ -561,28 +597,39 @@ function lensPath(bx, by, bw, bh) {
 
 function rebuild() {
   rows = S.rows;
-  cols = Math.round(rows * ASPECT * BAR_RATIO);
-  if (S.view === 'led') { SX = 4; SY = SX * BAR_RATIO; SW = cols * SX; SH = rows * SY; }
+  cols = led().across;                  // fixed by the LED size; rows only change the bar spacing
+  barRatio = cols / (ASPECT * rows);    // vertical bar pitch / horizontal LED pitch
+  if (S.view === 'led') { SX = 4; SY = Math.max(2, Math.round(SX * barRatio)); SW = cols * SX; SH = rows * SY; }
   else { SW = 1240; SH = Math.round(1240 / ASPECT); }
   src.width = SW; src.height = SH;
   for (const k in FM) delete FM[k];
-  // mask in physical units: width = cols, height = rows * BAR_RATIO
+  // mask in units of the LED pitch: width = cols, height = rows * barRatio
   const mc = document.createElement('canvas').getContext('2d');
-  const mp = lensPath(0, 0, cols, rows * BAR_RATIO);
+  const mp = lensPath(0, 0, cols, rows * barRatio);
   mask = new Uint8Array(cols * rows);
+  ledCount = 0;
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
-    mask[r * cols + c] = mc.isPointInPath(mp, c + 0.5, (r + 0.5) * BAR_RATIO) ? 1 : 0;
+    if (mc.isPointInPath(mp, c + 0.5, (r + 0.5) * barRatio)) { mask[r * cols + c] = 1; ledCount++; }
   ring = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     if (!mask[r * cols + c]) continue;
     const edge = r === 0 || r === rows - 1 || c === 0 || c === cols - 1 || !mask[(r - 1) * cols + c] || !mask[(r + 1) * cols + c] || !mask[r * cols + c - 1] || !mask[r * cols + c + 1];
-    if (edge) ring.push({ i: r * cols + c, a: Math.atan2((r + 0.5 - rows / 2) * BAR_RATIO, c + 0.5 - cols / 2) });
+    if (edge) ring.push({ i: r * cols + c, a: Math.atan2((r + 0.5 - rows / 2) * barRatio, c + 0.5 - cols / 2) });
   }
   ring.sort((p, q) => p.a - q.a);
   ring.forEach((p, k) => p.k = k);
   cellLit = new Float32Array(cols * rows * 3);
-  const o = $('outRows'); if (o) o.textContent = rows + ' bars · ' + cols + ' LEDs each';
+  updateRowsInfo();
   resize();
+}
+
+function updateRowsInfo() {
+  const pitch = FRONT_MM / ASPECT / rows, gap = pitch - led().bar, tight = gap < MIN_GAP_MM;
+  const o = $('outRows'); if (o) o.textContent = rows + ' bars';
+  const el = $('rowsInfo'); if (!el) return;
+  el.textContent = cols + ' across · ' + ledCount.toLocaleString('en-US') + ' LEDs · ' + Math.round(100 * Math.max(0, gap) / pitch) + '% see-through · ' + Math.max(0, gap).toFixed(1) + ' mm gaps' +
+    (tight ? '. Gaps under ' + MIN_GAP_MM + ' mm are too narrow to manufacture.' : '');
+  el.dataset.tone = tight ? 'bad' : '';
 }
 
 function resize() {
@@ -594,6 +641,7 @@ function resize() {
   bloomB.width = Math.ceil(W / 9); bloomB.height = Math.ceil(H / 9);
   const bw = W * 0.88, bh = bw / ASPECT;
   box = { x: (W - bw) / 2, y: (H - bh) / 2, w: bw, h: bh };
+  mm = bw / FRONT_MM;
   lens = lensPath(box.x, box.y, box.w, box.h);
   drawStatic(W, H);
 }
@@ -608,15 +656,14 @@ function drawStatic(W, H) {
   haze.addColorStop(0, '#11141d'); haze.addColorStop(1, '#0a0b10');
   b.fillStyle = haze; b.fillRect(box.x, box.y, box.w, box.h);
   if (S.view === 'led') {
-    const px = box.w / cols, py = box.h / rows, rLed = Math.min(px * 0.4, py * 0.2);
-    for (let r = 0; r < rows; r++) {
-      b.fillStyle = '#16171d';
-      b.fillRect(box.x, box.y + r * py + py * 0.5 - py * 0.21, box.w, py * 0.42);
-    }
+    // drawn to scale: bar width and LED size in millimeters
+    const L = led(), px = box.w / cols, py = box.h / rows, bh = L.bar * mm, rDark = L.size / 2 * mm * 0.8;
+    b.fillStyle = '#16171d';
+    for (let r = 0; r < rows; r++) b.fillRect(box.x, box.y + (r + 0.5) * py - bh / 2, box.w, bh);
     b.fillStyle = '#25262e';
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       if (!mask[r * cols + c]) continue;
-      b.beginPath(); b.arc(box.x + (c + 0.5) * px, box.y + (r + 0.5) * py, rLed * 0.8, 0, 6.2832); b.fill();
+      b.beginPath(); b.arc(box.x + (c + 0.5) * px, box.y + (r + 0.5) * py, rDark, 0, 6.2832); b.fill();
     }
   }
   b.restore();
@@ -658,22 +705,82 @@ function ensureWidth(w) {
 }
 
 function layout(t, dt) {
+  if (!words.length) return;
+  if (S.flow === 'pop') layoutPop();
+  else if (S.flow === 'single') layoutSingle(t);
+  else layoutScroll(dt, caretWanted(t));
+  const quiet = t - lastWordT > 3800 && (!listening || t - A.lastVoicedT > 1200);
+  if (quiet && !shout) {
+    fade -= dt / 0.8;
+    if (fade <= 0) { words = []; originX = 0; scrollInit = false; fade = 1; }
+  } else fade = 1;
+}
+
+/* Scroll: one long line that slides left to keep the newest word in view. */
+function layoutScroll(dt, caret) {
   const space = fontFor('calm').size * 0.3;
   let x = originX;
-  for (const w of words) { ensureWidth(w); w.x = x; x += w.width + space; }
-  if (!words.length) return;
-  const end = x - space, start = words[0].x, total = end - start, margin = SW * 0.04;
+  for (const w of words) { ensureWidth(w); w.fit = 1; w.x = x; x += w.width + space; }
+  const end = x - space + (caret ? space + caretW() : 0), start = words[0].x, total = end - start, margin = SW * 0.04;
   const target = total <= SW - 2 * margin ? start + total / 2 - SW / 2 : end - (SW - margin);
   if (!scrollInit) { scroll = target; scrollInit = true; }
   scroll += (target - scroll) * (1 - Math.exp(-dt / 0.09));
   while (words.length > 1 && words[0].x + words[0].width < scroll - SW * 0.15) {
     const w = words.shift(); originX += w.width + space;
   }
-  const quiet = t - lastWordT > 3800 && (!listening || t - A.lastVoicedT > 1200);
-  if (quiet && !shout) {
-    fade -= dt / 0.8;
-    if (fade <= 0) { words = []; originX = 0; scrollInit = false; fade = 1; }
-  } else fade = 1;
+}
+
+/* Pop on: words land in place left to right. A full line, or a pause, starts a fresh one. */
+function layoutPop() {
+  const space = fontFor('calm').size * 0.3, margin = SW * 0.04, avail = SW - 2 * margin;
+  let x = margin, page = 0;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]; ensureWidth(w);
+    w.fit = w.width > avail ? avail / w.width : 1;
+    const ww = w.width * w.fit;
+    if (i > page && (x + ww > SW - margin || w.gapBefore > 1500)) { page = i; x = margin; }
+    w.x = x; x += ww + space;
+  }
+  if (page > 0) words.splice(0, page);
+  scroll = 0; scrollInit = false;
+}
+
+/* One word: each word on its own, centered, held briefly so a burst doesn't flash past. */
+function layoutSingle(t) {
+  while (words.length > 1 && (t - words[0].born > 170 || words.length > 3)) { words.shift(); words[0].born = t; }
+  const w = words[0]; ensureWidth(w);
+  const avail = SW * 0.92;
+  w.fit = w.width > avail ? avail / w.width : 1;
+  w.x = (SW - w.width * w.fit) / 2;
+  for (let i = 1; i < words.length; i++) words[i].x = SW * 2;   // queued, off screen
+  scroll = 0; scrollInit = false;
+}
+
+/* Typing cursor: appears the instant you start talking, colored by how loud you are. */
+function caretW() { return Math.max(SW / cols * 1.2, SW * 0.012); }
+function caretWanted(t) {
+  return S.cursor && listening && A.ok && !shout && t - A.lastVoicedT < 700 && t - lastWordT > 350;
+}
+function caretRGB(t) {
+  const tr = tierOf(A.live);
+  if (tr === 0) return [246, 246, 242];
+  if (tr === 1) return [255, 186, 84];
+  if (tr === 2) return hsl(318, 1, 0.62);
+  return hsl(t * 0.6, 1, 0.6);
+}
+function drawCursor(t) {
+  if (!caretWanted(t)) return;
+  const fm = fontFor('calm'), space = fm.size * 0.3, margin = SW * 0.04, cw = caretW();
+  const last = S.flow === 'single' ? words[0] : words[words.length - 1];
+  let x = (SW - cw) / 2;
+  if (last && fade > 0.5) {
+    x = last.x - scroll + last.width * (last.fit || 1) + space;
+    if (x + cw > SW - margin * 0.5) { if (S.flow === 'scroll') x = SW - margin * 0.5 - cw; else return; }
+  }
+  const c = caretRGB(t), on = 0.35 + 0.65 * (0.5 + 0.5 * Math.cos((t - A.onsetT) * 0.0126));
+  sx.fillStyle = 'rgba(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ',' + on.toFixed(2) + ')';
+  const h = fm.size * 0.62;
+  sx.fillRect(x, fm.baseline - h, cw, h);
 }
 
 function updateShout(t) {
@@ -690,29 +797,34 @@ function updateShout(t) {
 
 function drawWord(w, t) {
   const fm = fontFor(kindOf(w.tier));
-  const x = w.x - scroll;
-  if (x > SW || x + w.width < 0) return;
+  const fit = w.fit || 1, ww = w.width * fit;
+  const slide = S.flow === 'scroll';            // scroll slides words in; the other modes pop them in place
   const age = t - w.born;
-  const enter = clamp(age / 140, 0, 1);
-  let alpha = fade * (w.final ? 1 : 0.68) * enter;
-  sx.save();
-  sx.font = fm.font;
-  sx.globalAlpha = alpha;
-  const dx = (1 - enter) * SH * 0.25;
-  if (w.tier === 0) {
-    sx.fillStyle = '#f6f6f2';
-    sx.fillText(w.disp, x + dx, fm.baseline);
-  } else if (w.tier === 1) {
-    const gr = sx.createLinearGradient(0, 0, 0, SH);
-    gr.addColorStop(0, '#ffe39a'); gr.addColorStop(1, '#ff8a2a');
-    sx.fillStyle = gr;
-    sx.fillText(w.disp, x + dx, fm.baseline);
-  } else {
+  const enter = clamp(age / (slide ? 140 : 90), 0, 1);
+  const x = w.x - scroll + (slide ? (1 - enter) * SH * 0.25 : 0);
+  if (x > SW || x + ww < 0) return;
+  const alpha = fade * (w.final ? 1 : 0.68) * enter;
+  let k = slide ? 1 : 0.88 + 0.12 * enter;
+  if (w.tier >= 2) {
     const pop = 1 + 0.28 * clamp(1 - age / 220, 0, 1);
     const pulse = w.tier === 2 ? 1 + 0.05 * Math.sin(t * 0.022) : 1 + 0.03 * Math.sin(t * 0.05);
-    const cx = x + dx + w.width / 2;
-    sx.translate(cx, SH / 2); sx.scale(pop * pulse, pop * pulse); sx.translate(-cx, -SH / 2);
-    const gr = sx.createLinearGradient(x, 0, x + w.width, 0);
+    k *= pop * pulse;
+  }
+  // draw around the word's center so pops, pulses and squeezes stay in place
+  sx.save();
+  sx.translate(x + ww / 2, SH / 2);
+  sx.scale(fit * k, k);
+  sx.font = fm.font;
+  sx.globalAlpha = alpha;
+  const x0 = -w.width / 2, y0 = fm.baseline - SH / 2;
+  if (w.tier === 0) {
+    sx.fillStyle = '#f6f6f2';
+  } else if (w.tier === 1) {
+    const gr = sx.createLinearGradient(0, -SH / 2, 0, SH / 2);
+    gr.addColorStop(0, '#ffe39a'); gr.addColorStop(1, '#ff8a2a');
+    sx.fillStyle = gr;
+  } else {
+    const gr = sx.createLinearGradient(x0, 0, -x0, 0);
     if (w.tier === 2) {
       const h0 = 315 + 25 * Math.sin(t * 0.004);
       gr.addColorStop(0, 'hsl(' + h0 + ',100%,62%)'); gr.addColorStop(1, 'hsl(' + (h0 + 70) + ',100%,58%)');
@@ -722,8 +834,8 @@ function drawWord(w, t) {
       sx.globalAlpha = alpha * (0.85 + 0.15 * Math.sin(t * 0.06));
     }
     sx.fillStyle = gr;
-    sx.fillText(w.disp, x + dx, fm.baseline);
   }
+  sx.fillText(w.disp, x0, y0);
   sx.restore();
 }
 
@@ -791,8 +903,11 @@ function renderSource(t, dt) {
   layout(t, dt);
   const sh = updateShout(t);
   if (sh) drawShout(t, sh);
-  else if (words.length) for (const w of words) drawWord(w, t);
-  else if (!listening && !demo) drawIdle(t);
+  else {
+    if (words.length) for (const w of words) drawWord(w, t);
+    else if (!listening && !demo) drawIdle(t);
+    drawCursor(t);
+  }
 }
 
 /* ---------------- rendering: the glasses ---------------- */
@@ -811,7 +926,7 @@ function renderGlasses(t) {
   l.clearRect(0, 0, W, H);
   if (S.view === 'led') {
     const img = sx.getImageData(0, 0, SW, SH).data;
-    const px = box.w / cols, py = box.h / rows, rLed = Math.min(px * 0.42, py * 0.21);
+    const px = box.w / cols, py = box.h / rows, rLed = led().size / 2 * mm * 1.2;   // lit LEDs spill a little light
     const n = SX * SY;
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const ci = r * cols + c;
@@ -906,7 +1021,7 @@ $('btnCal').addEventListener('click', startCalibration);
 cv.addEventListener('click', resumeRec);
 $('btnLog').addEventListener('click', () => {
   const summary = [
-    'Caption Shades log', 'UA: ' + navigator.userAgent,
+    'Caption Shades log v2', 'UA: ' + navigator.userAgent,
     'settings: ' + JSON.stringify(S),
     'noise ' + A.noise.toFixed(1) + ' dB, normal voice ' + A.base.toFixed(1) + ' dB, hfBase ' + A.hfBase.toFixed(3),
     'lags: ' + lags.map(Math.round).join(', '), '---'
@@ -923,14 +1038,20 @@ inRange.value = S.range; $('outRange').textContent = S.range + ' dB';
 inRows.value = S.rows;
 inRange.addEventListener('input', () => { S.range = +inRange.value; $('outRange').textContent = S.range + ' dB'; saveSettings(); });
 inRows.addEventListener('input', () => { S.rows = +inRows.value; saveSettings(); rebuild(); });
-const setView = v => { S.view = v; $('viewLed').setAttribute('aria-pressed', v === 'led'); $('viewIdeal').setAttribute('aria-pressed', v === 'ideal'); saveSettings(); rebuild(); };
-$('viewLed').addEventListener('click', () => setView('led'));
-$('viewIdeal').addEventListener('click', () => setView('ideal'));
+function bindSeg(key, ids, after) {
+  const sync = () => { for (const v in ids) $(ids[v]).setAttribute('aria-pressed', S[key] === v); };
+  for (const v in ids) $(ids[v]).addEventListener('click', () => { S[key] = v; saveSettings(); sync(); after(); });
+  sync();
+}
+bindSeg('view', { led: 'viewLed', ideal: 'viewIdeal' }, rebuild);
+bindSeg('led', { fine: 'ledFine', bright: 'ledBright' }, rebuild);
+bindSeg('flow', { scroll: 'flowScroll', pop: 'flowPop', single: 'flowSingle' }, () => { scrollInit = false; });
 $('inInterim').checked = S.interim;
 $('inInterim').addEventListener('change', e => { S.interim = e.target.checked; saveSettings(); });
+$('inCursor').checked = S.cursor;
+$('inCursor').addEventListener('change', e => { S.cursor = e.target.checked; saveSettings(); });
 $('inAnalysis').checked = S.analysis;
 $('inAnalysis').addEventListener('change', e => { S.analysis = e.target.checked; saveSettings(); if (!S.analysis) A.liveTarget = 0; });
-$('viewLed').setAttribute('aria-pressed', S.view === 'led'); $('viewIdeal').setAttribute('aria-pressed', S.view === 'ideal');
 
 window.addEventListener('resize', () => { clearTimeout(resize.t); resize.t = setTimeout(resize, 80); });
 if (document.fonts && document.fonts.load) {
