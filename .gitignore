@@ -1,0 +1,3 @@
+hardware/panel/*.kicad_pcb
+hardware/panel/placement_*.csv
+hardware/panel/preview.png
